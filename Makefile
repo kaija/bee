@@ -1,7 +1,7 @@
 
-LIB_OBJS=bee.o
+LIB_OBJS=bee.o utils.o
 
-CFLAGS= -fPIC
+CFLAGS= -fPIC -Wall -I./include
 LDFLAGS=
 SHARED_LIB=libbee.so
 STATIC_LIB=libbee.a

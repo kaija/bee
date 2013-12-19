@@ -5,7 +5,7 @@ LDFLAGS= ../libbee.a
 all: test1
 
 test1: test1.o
-	$(CC) -o test1 test1.o $(CFLAGS) $(LDFLAGS)
+	$(CC) -o test1.exe test1.o $(CFLAGS) $(LDFLAGS)
 
 clean:
-	rm *.o  test1 -rf
+	rm *.o  test1.exe -rf
