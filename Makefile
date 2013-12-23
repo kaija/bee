@@ -1,7 +1,15 @@
 
-LIB_OBJS=bee.o utils.o
+LIB_OBJS=bee.o
+LIB_OBJS+= utils.o
+LIB_OBJS+= sm_api.o
 
-CFLAGS= -fPIC -Wall -I./include
+LIB_OBJS+= third_party/simclist.o
+LIB_OBJS+= third_party/parson.o
+LIB_OBJS+= third_party/http.o
+LIB_OBJS+= third_party/log.o
+
+
+CFLAGS= -fPIC -Wall -I./include -I../mosquitto/lib
 LDFLAGS=
 SHARED_LIB=libbee.so
 STATIC_LIB=libbee.a

@@ -1,5 +1,5 @@
-CFLAGS= -I../
-LDFLAGS= ../libbee.a
+CFLAGS= -I../include
+LDFLAGS= ../libbee.a ../../mosquitto/lib/libmosquitto.a -lssl -lpthread
 
 .PHONY: all test1
 all: test1
