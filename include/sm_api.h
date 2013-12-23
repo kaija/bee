@@ -1,7 +1,8 @@
 #ifndef __SM_API_H
 #define __SM_API_H
 
-#define SM_API_SERVER "http://www-dev.securepilot.com:8080"
+//#define SM_API_SERVER "http://www-dev.securepilot.com:8080"
+#define SM_API_SERVER "https://www-dev.securepilot.com"
 #define SM_API_SECURE_SERVER "https://www-dev.securepilot.com"
 
 enum{
@@ -28,7 +29,9 @@ enum{
     SM_GET_FAILURE,
     SM_SEND_FAILURE,
     SM_SESS_TIMEOUT,
+    SM_NO_TOKEN,
     SM_SERV_ERROR,
+    SM_CONN_ERROR,
     SM_DB_ERROR,
     SM_LIB_ERROR,
     SM_UNKNOWN_ERROR
@@ -47,6 +50,7 @@ enum{
 #define HTTP_RET_LEN        16
 
 #define SM_SESS_LEN         128
+#define SM_UID_LEN          32
 #define SM_API_KEY_LEN      64
 #define SM_API_SEC_LEN      64
 

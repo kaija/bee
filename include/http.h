@@ -9,40 +9,38 @@
 #include <sys/time.h>
 #include <netdb.h>
 
-#ifdef HAVE_OPENSSL
 #include <openssl/crypto.h>
 #include <openssl/ssl.h>
 #include <openssl/ssl23.h>
 #include <openssl/ssl2.h>
-#endif //HAVE_OPENSSL
 
 
-#define HTTP_HEADER_NUM 32
-#define HTTP_NONCE_LEN	34
-#define HTTP_USER_LEN	64
-#define HTTP_PASS_LEN	64
+#define HTTP_HEADER_NUM         32
+#define HTTP_NONCE_LEN	        34
+#define HTTP_USER_LEN	        64
+#define HTTP_PASS_LEN	        64
 
-#define HTTP_AUTH_LEN	128
-#define HTTP_PATH_LEN	512
-#define HTTP_HOST_LEN	512
+#define HTTP_AUTH_LEN	        128
+#define HTTP_PATH_LEN   	    512
+#define HTTP_HOST_LEN	        512
 
-#define HTTP_URI_LEN	1024
-#define HTTP_RECV_BUF	1000
+#define HTTP_URI_LEN	        1024
+#define HTTP_RECV_BUF	        1000
 
-#define HTTP_HEADER_LEN	512
+#define HTTP_HEADER_LEN	        512
 
-#define DEFAULT_HTTP_PORT	80
-#define DEFAULT_HTTPS_PORT	443
+#define DEFAULT_HTTP_PORT	    80
+#define DEFAULT_HTTPS_PORT	    443
 
-#define FILE_PATH_LEN	128
+#define FILE_PATH_LEN	        128
 
 #define HTTP_TIMEOUT	        3
 #define HTTP_SEND_TIMEOUT	    1
 #define HTTP_KEEP_TIMEOUT       3
 
-#define SSL_DEPTH 		1
-#define SSL_KEY_PW_LEN	64
-#define SSL_DATA_LEN	256
+#define SSL_DEPTH 		        1
+#define SSL_KEY_PW_LEN	        64
+#define SSL_DATA_LEN	        256
 
 #ifdef DEBUG_HTTP
 #define LOG printf
@@ -114,17 +112,16 @@ struct http_data {
     int                 body_send_len;
 	int (*send)(struct http_data *, void *, int, int);
 	int (*recv)(struct http_data *, void *, int, int);
-#ifdef HAVE_OPENSSL
 	BIO 				*bio;
 	SSL_CTX				*ctx;
 	SSL					*ssl;
-#endif //HAVE_OPENSSL
 	struct hdb			http;
 };
 
 #define DBGHTTP(fmt, args...)  printf("[%s:%d]" fmt, __FILE__,__LINE__,##args)
 
-
+char *http_url_encode(char *str);
+char *http_url_decode(char *str);
 struct http_data *http_create();
 int http_set_uri(struct http_data *hd, char *uri);
 int http_set_cert_path(struct http_data *hd, char *cert, int verify_serv);

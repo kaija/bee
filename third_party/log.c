@@ -186,6 +186,7 @@ int plogger_set_file_size(char *size)
 
 int plogger_init()
 {
+    printf("logger init\n");
     if(plog.fp == NULL && (plog.mode & PLOG_TO_FILE)){
         plog.fp = fopen(plog.path, "a");
         if(plog.fp){

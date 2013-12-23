@@ -82,3 +82,29 @@ int noly_udp_sender(char *addr, int port, char *payload, int len)
     close(sock);
     return n;
 }
+
+int noly_tcp_socket(int port, int max_cli)
+{
+    int max;
+    if(port < 1 || port > 65535) return -1;
+    if(max_cli < 1 || max_cli > 65535)
+        max = 10;
+    else
+        max = max_cli;
+    int sock = -1;
+    struct sockaddr_in srv_addr;
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if(sock > 0){
+        memset(&srv_addr, 0, sizeof(srv_addr));
+        srv_addr.sin_family = AF_INET;
+        srv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        srv_addr.sin_port = htons(port);
+        if(bind(sock, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) < 0 || listen(sock, max) != 0){
+            close(sock);
+            sock = -1;
+        }
+        noly_socket_set_reuseaddr(sock);
+        noly_socket_set_nonblock(sock);
+    }
+    return sock;
+}

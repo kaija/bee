@@ -183,7 +183,6 @@ int http_recv(struct http_data *hd, void *buf, int len, int timeout) {
     return ret;
 }
 
-#ifdef HAVE_OPENSSL
 int https_send(struct http_data *hd, void *buf, int len, int timeout) {
     int ret = -1, sent = 0;
     struct timeval tv;
@@ -243,9 +242,6 @@ int https_recv(struct http_data *hd, void *buf, int len, int timeout) {
     }
     return ret;
 }
-#endif
-
-
 
 int http_host_parse(struct http_data *hd) {
     char *ppath, *pport;
@@ -256,12 +252,8 @@ int http_host_parse(struct http_data *hd) {
         if(strncasecmp(hd->uri.server, "https://", 8) == 0){
             hd->uri.proto = PROTO_HTTPS;
             host = serv + strlen("https://");;
-#ifdef HAVE_OPENSSL
             hd->send = https_send;
             hd->recv = https_recv;
-#else
-            return -1;
-#endif // HAVE_OPENSSL
         }else if(strncasecmp(hd->uri.server, "http://", 7) == 0){
             hd->uri.proto = PROTO_HTTP;
             host = serv + strlen("http://");;
@@ -311,7 +303,6 @@ err:
     return -1;
 }
 
-#ifdef HAVE_OPENSSL
 static int ca_verify_cb(int ok, X509_STORE_CTX *store)
 {
     int depth, err;
@@ -377,10 +368,8 @@ int http_ssl_setup(struct http_data *hd) {
         PLOG(PLOG_LEVEL_DEBUG,"Connected to SSL success\n");
     return 0;
 }
-#endif
 
 void destroy_ssl(struct http_data *hd) {
-#ifdef HAVE_OPENSSL
     if(hd->ssl) {
         SSL_set_shutdown(hd->ssl, 2);
         SSL_shutdown(hd->ssl);
@@ -389,7 +378,6 @@ void destroy_ssl(struct http_data *hd) {
     if(hd->ctx) SSL_CTX_free(hd->ctx);
     hd->ssl = NULL;
     hd->ctx = NULL;
-#endif
 }
 
 void destroy_http(struct http_data *hd) {
@@ -1088,13 +1076,11 @@ int http_perform(struct http_data *hd) {
         return -1;
     }
     if(hd->uri.proto == PROTO_HTTPS) {
-#ifdef HAVE_OPENSSL
         if(http_ssl_setup(hd) == -1){
             destroy_ssl(hd);
             destroy_http(hd);
             return -1;
         }
-#endif //HAVE_OPENSSL
     }
     struct http_data *hd2 = NULL;
     for(;;) {

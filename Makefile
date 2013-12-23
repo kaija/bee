@@ -4,12 +4,14 @@ LIB_OBJS+= utils.o
 LIB_OBJS+= sm_api.o
 
 LIB_OBJS+= third_party/simclist.o
+LIB_OBJS+= third_party/lssdp.o
 LIB_OBJS+= third_party/parson.o
 LIB_OBJS+= third_party/http.o
 LIB_OBJS+= third_party/log.o
 
 
 CFLAGS= -fPIC -Wall -I./include -I../mosquitto/lib
+CFLAGS+= -DHAVE_OPENSSL
 LDFLAGS=
 SHARED_LIB=libbee.so
 STATIC_LIB=libbee.a
@@ -28,5 +30,5 @@ sample:
 
 
 clean:
-	rm *.o *.a *.so -rf
+	rm *.o *.a *.so third_party/*.o -rf
 	$(MAKE) -C sample clean

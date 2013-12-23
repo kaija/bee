@@ -3,6 +3,9 @@
 #include <pthread.h>
 #include "sm_api.h"
 
+#define BEE_TRUE        1
+#define BEE_FALSE       0
+
 #define BEE_ID_LEN      64
 #define BEE_IP_LEN      32
 
@@ -13,12 +16,38 @@
 
 #define BEE_SRV_TYPE    "ST_P2P"
 #define BEE_SSDP_ST_LEN 64
+#define BEE_SRV_PORT    5678
+#define BEE_SRV_CLI     10      //max service client
+
+#define BEE_LOCALHOST   "localhost"
+
 
 #define BEE_TOPIC_LEN   128
+#define BEE_KEEPALIVE   60
+
+#define BEE_TIMEOUT_S    0
+#define BEE_TIMEOUT_US   500*1000
+
+enum{
+    BEE_INIT,
+    BEE_LOGINING,
+    BEE_LOGIN,
+    BEE_CONNECTING,
+    BEE_CONNECTED,
+    BEE_DISCONNETED,
+    BEE_ERROR
+};
+
+enum{
+    BEE_SOCKET_ERROR,
+    BEE_SSDP_ERROR,
+    BEE_OOM
+};
 
 enum{
     BEE_API_OK,
-    BEE_API_FAIL
+    BEE_API_FAIL,
+    BEE_API_PARAM_ERROR
 };
 
 struct bee_nbr
@@ -41,6 +70,7 @@ struct sm_account {
     char                pkeypath[HTTP_CA_PATH_LEN];
     char                pkeypass[HTTP_PASSWORD_LEN];
     char                session[SM_SESS_LEN];
+    char                uid[SM_UID_LEN];
     char                api_key[SM_API_KEY_LEN];
     char                api_sec[SM_API_SEC_LEN];
 };
@@ -57,19 +87,35 @@ struct mqtt_account {
     int                 qos;
     int                 debug;
     int                 retain;
-    int                 keep_alive;
+    int                 keepalive;
     int                 will;
+    int                 sock;
     int                 (*msg_cb)(char *, void *, int);
     int                 (*sm_msg_cb)(void *, int);
 };
+
+struct ssdp_profile {
+    char                ssdp_st[BEE_SSDP_ST_LEN];
+    int                 sock;
+};
+
+struct local_serv {
+    int                 sock;
+    int                 port;
+};
+
 struct bee_struct {
     pthread_t           bee_thread;
     struct sm_account   sm;
     struct mqtt_account mqtt;
+    struct ssdp_profile ssdp;
+    struct local_serv   local;
     int                 type;   //user or dev
     int                 run;    //stop library run
     int                 status; //the library status
-    char                ssdp_st[BEE_SSDP_ST_LEN];
+    int                 error;  //error code
+    int                 event_port;
+    int                 event_sock;
 };
 
 #endif
