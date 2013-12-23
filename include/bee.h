@@ -2,6 +2,11 @@
 #define __BEE_H
 #include <pthread.h>
 #include "sm_api.h"
+#include "simclist.h"
+
+#ifndef INVALID_SOCKET
+#define INVALID_SOCKET (-1)
+#endif
 
 #define BEE_TRUE        1
 #define BEE_FALSE       0
@@ -25,8 +30,12 @@
 #define BEE_TOPIC_LEN   128
 #define BEE_KEEPALIVE   60
 
-#define BEE_TIMEOUT_S    0
-#define BEE_TIMEOUT_US   500*1000
+#define BEE_TIMEOUT_S   0
+#define BEE_TIMEOUT_US  500*1000
+
+#define BEE_PKT_SIZE    1500
+
+#define BEE_MSG_SIZE    16*1024
 
 enum{
     BEE_INIT,
@@ -61,6 +70,11 @@ struct bee_nbr
 struct bee_user_list{
     char                **user_list;
     int                 user_num;
+};
+
+struct bee_client{
+    int local;
+    int fd;
 };
 
 struct sm_account {
@@ -102,6 +116,7 @@ struct ssdp_profile {
 struct local_serv {
     int                 sock;
     int                 port;
+    list_t              client;
 };
 
 struct bee_struct {

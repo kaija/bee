@@ -730,7 +730,7 @@ int recv_http_header(struct http_data *hd) {
                 hd->http.buf[hd->http.buf_offset] = '\0';
                 buf = hd->http.buf;
                 keep = 1;
-                PLOG(PLOG_LEVEL_DEBUG,"\n%s\n",hd->http.buf);
+                //PLOG(PLOG_LEVEL_DEBUG,"\n%s\n",hd->http.buf);
                 //FIXME if header is not completed
             }else if(len == 0){
                 PLOG(PLOG_LEVEL_DEBUG,"recv timeout\n");
@@ -1017,7 +1017,7 @@ int http_recv_resp(struct http_data *hd) {
                 if(http_decode_chunk_body(hd) ==0 ){
                     if(hd->http.body.start){
                         hd->http.body.start[hd->http.content_len] = '\0';
-                        PLOG(PLOG_LEVEL_DEBUG, "chunked length %d\n",hd->http.content_len);
+                        //PLOG(PLOG_LEVEL_DEBUG, "chunked length %d\n",hd->http.content_len);
                         return 0;
                     }else{
                         return -1;

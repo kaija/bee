@@ -2,8 +2,8 @@
 #define __SM_API_H
 
 //#define SM_API_SERVER "http://www-dev.securepilot.com:8080"
-#define SM_API_SERVER "https://www-dev.securepilot.com"
-#define SM_API_SECURE_SERVER "https://www-dev.securepilot.com"
+#define SM_API_SERVER "https://s4.securepilot.com"
+#define SM_API_SECURE_SERVER "https://s4.securepilot.com"
 
 enum{
     SM_MSG_TYPE_DEFAULT,

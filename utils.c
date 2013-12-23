@@ -13,6 +13,8 @@
 #include <errno.h>
 #include <sys/stat.h>
 
+#include "parson.h"
+
 int noly_socket_set_reuseaddr(int sk)
 {
     int on = 1;
@@ -99,12 +101,70 @@ int noly_tcp_socket(int port, int max_cli)
         srv_addr.sin_family = AF_INET;
         srv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
         srv_addr.sin_port = htons(port);
+        noly_socket_set_reuseaddr(sock);
+        noly_socket_set_nonblock(sock);
         if(bind(sock, (struct sockaddr *)&srv_addr, sizeof(srv_addr)) < 0 || listen(sock, max) != 0){
+            printf("bind error (%d) %s\n", errno, strerror(errno));
             close(sock);
             sock = -1;
         }
-        noly_socket_set_reuseaddr(sock);
-        noly_socket_set_nonblock(sock);
+        printf("tcp socket %d port %d have being created\n", sock, port);
     }
     return sock;
+}
+
+
+int json_obj_get_obj(JSON_Object *obj, char *key, char *val, int len)
+{
+    if(!obj) return -1;
+    size_t obj_count = json_object_get_count(obj);
+    int i = 0;
+    int ret = -1;
+    for(i = 0 ; i < obj_count ; i++) {
+        const char *name = json_object_get_name(obj, i);
+        if(name){
+            JSON_Object *sub_obj = json_object_get_object(obj, name);
+            if(sub_obj){//recursive
+                ret = json_obj_get_obj(sub_obj, key, val, len);
+                if(ret == 0) break;
+            }else{
+                if(strcmp(key, name) == 0){
+                    const char *str = json_object_get_string(obj, name);
+                    if(!str){
+                        double num = json_object_get_number(obj, name);
+                        snprintf(val, len ,"%0.0lf\n", num);
+                    }else{
+                        snprintf(val, len ,"%s", str);
+                    }
+                    return 0;
+                }
+            }
+        }else{
+            printf("json object no name???\n");
+        }
+    }
+    return ret;
+}
+
+int json_str_get_obj(char *str, char *key, char *val, int len)
+{
+    int ret = -1;
+    if(!key || !val) return -1;
+    JSON_Value *js_val = NULL;
+    JSON_Object *js_obj;
+    js_val = json_parse_string(str);
+    if(json_value_get_type(js_val) == JSONObject){
+        js_obj = json_value_get_object(js_val);
+        ret = json_obj_get_obj(js_obj, key, val, len);
+    }
+    json_value_free(js_val);
+    return ret;
+}
+
+void test()
+{
+    char val[128];
+    char tmp[] = "{\"serial\":450024072,\"src\":\"700000165\",\"type\":5,\"version\":\"1.0\"}";
+    json_str_get_obj(tmp, "serial", val, 128);
+    printf("result : %s\n", val);
 }

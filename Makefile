@@ -13,8 +13,8 @@ LIB_OBJS+= third_party/log.o
 CFLAGS= -fPIC -Wall -I./include -I../mosquitto/lib
 CFLAGS+= -DHAVE_OPENSSL
 LDFLAGS=
-SHARED_LIB=libbee.so
-STATIC_LIB=libbee.a
+SHARED_LIB=lib/libbee.so
+STATIC_LIB=lib/libbee.a
 
 .PHONY: shared static sample
 
@@ -30,5 +30,5 @@ sample:
 
 
 clean:
-	rm *.o *.a *.so third_party/*.o -rf
+	rm *.o lib/*.a lib/*.so third_party/*.o -rf
 	$(MAKE) -C sample clean

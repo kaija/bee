@@ -166,6 +166,7 @@ struct http_body *http_post(char *url, char *data, int len, int method)
                 if(hb->body){
                     memcpy(hb->body, hd->http.body.start, hd->http.content_len);
                     hb->len = hd->http.content_len;
+                    hb->body[hb->len] = '\0';
                 }else{
                     PLOG(PLOG_LEVEL_ERROR, "Out of memory\n");
                 }
@@ -345,7 +346,7 @@ int sm_get_msg_info(int type, char *sess, struct msg_service_info *info) {
     }
     hb = http_post(url, body, body_len, HTTP_POST);
     if(hb) {
-        //printf("body\n%s\n",hb->body);
+        PLOG(PLOG_LEVEL_DEBUG, "body\n%s\n", hb->body);
         if(body_get_field(hb->body, "mqtt_server", info->mqtt_ip, HTTP_IP_LEN)==-1){
             res = -1;
         }
@@ -421,7 +422,7 @@ int sm_dev_login(int login_type, char *username, char *password, char *ca_path, 
     snprintf(url, HTTP_URL_LEN, "%s/v1/device/login",SM_API_SECURE_SERVER);
     hb = http_post(url,NULL, 0, HTTP_GET);
     if(hb) {
-        PLOG(PLOG_LEVEL_INFO, "body\n%s\n", hb->body);
+        PLOG(PLOG_LEVEL_DEBUG, "Recv from SM:\n%s\n", hb->body);
         if(sess && hb->body) {
             if(strstr(hb->body, "Unauthorized") != NULL){
                 PLOG(PLOG_LEVEL_DEBUG, "Your id and password not correct\n");
@@ -436,7 +437,7 @@ int sm_dev_login(int login_type, char *username, char *password, char *ca_path, 
                             PLOG(PLOG_LEVEL_DEBUG, "Login error cannot get token\n");
                             ret = -1;
                         }else{
-                            if (body_get_field(hb->body, "gid", uid, HTTP_USERNAME_LEN) == -1) {
+                            if (body_get_field(hb->body, "gid", uid, SM_UID_LEN) == -1) {
                                 PLOG(PLOG_LEVEL_WARN, "Cannot get uid!\n");
                             }
                             sm_status_handle(username, 0, SM_LOGIN_SUCCESS);
