@@ -25,6 +25,7 @@ void *bee_main(void *data);
 int bee_init(int type);
 int bee_login(int type);
 int bee_mqtt_start();
+int bee_message_handler(char *src, char *data);
 /* ===============================================
  *     Mosquitto callback area
  */
@@ -54,11 +55,17 @@ void bee_mqtt_message_callback(struct mosquitto *mosq, void *obj, const struct m
     PLOG(PLOG_LEVEL_DEBUG, "%s\n", message->payload);
     //mosquitto_message_free(message);
     //{"serial":450024072,"src":"700000165","type":5,"version":"1.0"}
+    char src[SM_UID_LEN];
     if(strstr(message->payload, "content") != NULL){//push notify
         char *data = malloc(message->payloadlen);
         if(data){
+            memset(data, 0, message->payloadlen);
             if(json_str_get_obj(message->payload, "content", data, message->payloadlen) == 0 ){
+                if(json_str_get_obj(message->payload, "src", src, SM_UID_LEN) == 0 ){
+                    bee_message_handler(src, data);
+                }
             }
+            free(data);
         }else{
             PLOG(PLOG_LEVEL_ERROR, "Out of memory\n");
         }
@@ -328,13 +335,78 @@ int bee_connect(char *id)
     //FIXME add local tcp socket handle
     return BEE_API_OK;
 }
-
-int bee_send_message(char *id, int cid, void *data, int len, int type)
+int bee_send_message(char *id, void *data, unsigned long len, int type)
 {
+    int ret = -1;
+    size_t out_len;
+    char *b64 = base64_encode(data, len, &out_len);
+    if(b64){
+        ret = sm_send_msg(bee.sm.session ,id, bee.sm.api_key, b64, type);
+        free(b64);
+    }
+    return ret;
+}
+
+int bee_send_data(char *id, int cid, void *data, unsigned long len, int type)
+{
+    if(!data || len == 0) return BEE_API_PARAM_ERROR;
     //FIXME add local tcp socket case
-printf("API KEY %s %s\n", bee.sm.api_key, bee.sm.username);
-    sm_send_msg(bee.sm.session ,id, bee.sm.api_key, "xxxxxx", SM_MSG_TYPE_RT);
+    unsigned char *tlv = malloc(len + 8);
+    if(tlv){
+        tlv[0] = 0x00;
+        tlv[1] = 0x01;
+        tlv[2] = 0x00;
+        tlv[3] = 0x00;
+        tlv[4] = (int) ((len>>24) & 0xff);
+        tlv[5] = (int) ((len>>16) & 0xff);
+        tlv[6] = (int) ((len>>8) & 0xff);
+        tlv[7] = (int) ((len) & 0xff);
+        memcpy(&tlv[8] , data, len);
+        noly_hexdump(tlv, 8 + len );
+        bee_send_message(id, tlv, len + 8, type);
+        free(tlv);
+    }
     return BEE_API_OK;
+}
+
+int bee_send_p2p(char *id, void *data, unsigned long len)
+{
+    if(!data || len == 0) return BEE_API_PARAM_ERROR;
+    unsigned char *tlv = malloc(len + 8);
+    if(tlv){
+        tlv[0] = 0x00;
+        tlv[1] = 0x02;
+        tlv[2] = 0x00;
+        tlv[3] = 0x00;
+        tlv[4] = (int) ((len>>24) & 0xff);
+        tlv[5] = (int) ((len>>16) & 0xff);
+        tlv[6] = (int) ((len>>8) & 0xff);
+        tlv[7] = (int) ((len) & 0xff);
+        memcpy(&tlv[8] , data, len);
+        noly_hexdump(tlv, 8 + len );
+        bee_send_message(id, tlv, len + 8, SM_MSG_TYPE_RT);
+        free(tlv);
+    }
+    return BEE_API_OK;
+}
+
+int bee_message_handler(char *src, char *data)
+{
+    PLOG(PLOG_LEVEL_DEBUG,"%s\n%s\n", src, data);
+    size_t tlv_len;
+    char *tlv = base64_decode(data, strlen(data), &tlv_len);
+    if(tlv){
+        if(tlv[1] == 0x01){//Data
+        }else if(tlv[1] == 0x00){//SM
+            
+        }else{//P2P connection use
+            PLOG(PLOG_LEVEL_INFO,"Bee library not support P2P mode reply something\n");
+            char reply[] = "{\"cmd\":\"conn_reject\",\"reason\":\"not support\"}";
+            bee_send_p2p(src, reply, strlen(reply));
+        }
+        free(tlv);
+    }
+    return 0;
 }
 
 int bee_reg_sm_cb(int (*callback)(void *data, int len))

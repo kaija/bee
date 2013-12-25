@@ -162,7 +162,7 @@ struct http_body *http_post(char *url, char *data, int len, int method)
         }
         if(http_perform(hd) == 0){
             if(hb->body == NULL) {
-                hb->body = malloc(hd->http.content_len);
+                hb->body = malloc(hd->http.content_len + 1);
                 if(hb->body){
                     memcpy(hb->body, hd->http.body.start, hd->http.content_len);
                     hb->len = hd->http.content_len;
