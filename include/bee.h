@@ -41,6 +41,8 @@ enum{
     BEE_INIT,
     BEE_LOGINING,
     BEE_LOGIN,
+    BEE_GET_INFO,
+    BEE_GOT_INFO,
     BEE_CONNECTING,
     BEE_CONNECTED,
     BEE_DISCONNETED,
@@ -50,12 +52,15 @@ enum{
 enum{
     BEE_SOCKET_ERROR,
     BEE_SSDP_ERROR,
+    BEE_NOT_LOGIN,
     BEE_OOM
 };
 
 enum{
     BEE_API_OK,
     BEE_API_FAIL,
+    BEE_API_TIMEOUT,
+    BEE_API_NOT_LOGIN,
     BEE_API_PARAM_ERROR
 };
 
@@ -104,8 +109,6 @@ struct mqtt_account {
     int                 keepalive;
     int                 will;
     int                 sock;
-    int                 (*msg_cb)(char *, void *, int);
-    int                 (*sm_msg_cb)(void *, int);
 };
 
 struct ssdp_profile {
@@ -121,6 +124,7 @@ struct local_serv {
 
 struct bee_struct {
     pthread_t           bee_thread;
+    pthread_mutex_t     api_lock;
     struct sm_account   sm;
     struct mqtt_account mqtt;
     struct ssdp_profile ssdp;
@@ -131,6 +135,8 @@ struct bee_struct {
     int                 error;  //error code
     int                 event_port;
     int                 event_sock;
+    int                 (*msg_cb)(char *, void *, int);
+    int                 (*sm_msg_cb)(void *, int);
 };
 
 #endif

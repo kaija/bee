@@ -67,6 +67,7 @@ int init_http_body(struct http_body *s) {
         PLOG(PLOG_LEVEL_ERROR, "malloc() failed\n");
         return -1;
     }
+    memset(s->body, 0, s->len + 1);
     s->body[0] = '\0';
     return 0;
 }
@@ -139,6 +140,7 @@ struct http_body *http_post(char *url, char *data, int len, int method)
     if(url == NULL) return NULL;
     struct http_body *hb = malloc(sizeof(struct http_body));;
     if(hb == NULL) return NULL;
+    memset(hb, 0, sizeof(struct http_body));
     hb->body = NULL;
     struct http_data *hd = http_create();
     if(hd) {
@@ -312,8 +314,8 @@ char *sm_get_msg(char *sess, char *api_key, int serial) {
             if(body_get_field(hb->body, "code", ret_code, HTTP_RET_LEN)!=-1){
                 res = malloc(hb->len+1);
                 if(res){
-                    res[hb->len] = 0;
                     memcpy(res, hb->body, hb->len);
+                    res[hb->len] = 0;
                 }
                 sm_ret_code_handler(sm_setup.username, ret_code);
             }else{
@@ -329,7 +331,7 @@ char *sm_get_msg(char *sess, char *api_key, int serial) {
 int sm_get_msg_info(int type, char *sess, struct msg_service_info *info) {
     char url[HTTP_URL_LEN];
     if(!sess) return  -1;
-    int res = 0;
+    int res = -1;
     struct http_body *hb;
     int body_len = 0;
     char body[HTTP_BODY_SIZE];
@@ -349,19 +351,25 @@ int sm_get_msg_info(int type, char *sess, struct msg_service_info *info) {
         PLOG(PLOG_LEVEL_DEBUG, "body\n%s\n", hb->body);
         if(body_get_field(hb->body, "mqtt_server", info->mqtt_ip, HTTP_IP_LEN)==-1){
             res = -1;
+            goto err;
         }
         char port[8];
         if(body_get_field(hb->body, "mqtt_server_port", port, 8)==-1){
             res = -1;
+            goto err;
         }
         info->mqtt_port = atoi(port);
         if(body_get_field(hb->body, "id", info->mqtt_id, HTTP_USERNAME_LEN)==-1){
             res = -1;
+            goto err;
         }
         if(body_get_field(hb->body, "pwd", info->mqtt_pw, HTTP_PASSWORD_LEN)==-1){
             res = -1;
+            goto err;
         }
+err:
         free_hb(hb);
+        res = 0;
     }
     return res;
 }

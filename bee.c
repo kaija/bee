@@ -18,14 +18,17 @@
 static struct bee_struct bee = {
     .run = BEE_FALSE,
     .mqtt.mosq = NULL,
-    .mqtt.security = 1,
+    .mqtt.security = 0,
     .local.sock = 0,
+    .sm_msg_cb = NULL,
+    .msg_cb = NULL,
 };
 void *bee_main(void *data);
 int bee_init(int type);
 int bee_login(int type);
 int bee_mqtt_start();
 int bee_message_handler(char *src, char *data);
+int bee_sm_message_handler(char *tlv, unsigned long tlv_len);
 /* ===============================================
  *     Mosquitto callback area
  */
@@ -225,6 +228,9 @@ int bee_init(int type)
     bee.mqtt.retain = 0;
     bee.mqtt.keepalive = BEE_KEEPALIVE; // Default 60 sec keepalive
     bee.mqtt.clean_sess = BEE_TRUE;
+    if(pthread_mutex_init(&bee.api_lock, NULL) != 0){
+        PLOG(PLOG_LEVEL_ERROR, "API lock init error\n");
+    }
     if(bee.ssdp.sock == 0){
         bee.ssdp.sock = lssdp_create_socket();
         if(bee.ssdp.sock < 0) {
@@ -258,6 +264,7 @@ int bee_user_login_id_pw(char *id, char *pw)
     strncpy(bee.sm.username, id, HTTP_USERNAME_LEN);
     strncpy(bee.sm.password, pw, HTTP_PASSWORD_LEN);
     bee_login(SM_TYPE_USER);
+    bee.type = SM_TYPE_USER;
     return BEE_API_OK;
 }
 
@@ -268,6 +275,7 @@ int bee_user_login_cert(char *cert_path, char *pkey_path, char *pw)
     strncpy(bee.sm.pkeypath, pkey_path, HTTP_CA_PATH_LEN);
     strncpy(bee.sm.pkeypass, pw, HTTP_PASSWORD_LEN);
     bee_login(SM_TYPE_USER);
+    bee.type = SM_TYPE_USER;
     return BEE_API_OK;
 }
 int bee_dev_login_id_pw(char *id, char *pw)
@@ -276,6 +284,7 @@ int bee_dev_login_id_pw(char *id, char *pw)
     strncpy(bee.sm.username, id, HTTP_USERNAME_LEN);
     strncpy(bee.sm.password, pw, HTTP_PASSWORD_LEN);
     bee_login(SM_TYPE_DEVICE);
+    bee.type = SM_TYPE_DEVICE;
     return BEE_API_OK;
 }
 
@@ -286,7 +295,25 @@ int bee_dev_login_cert(char *cert_path, char *pkey_path, char *pw)
     strncpy(bee.sm.pkeypath, pkey_path, HTTP_CA_PATH_LEN);
     strncpy(bee.sm.pkeypass, pw, HTTP_PASSWORD_LEN);
     bee_login(SM_TYPE_DEVICE);
+    bee.type = SM_TYPE_DEVICE;
     return BEE_API_OK;
+}
+
+int bee_get_msg_info()
+{
+    struct msg_service_info info;
+    if(sm_get_msg_info(bee.type, bee.sm.session, &info) == 0){
+        strncpy(bee.mqtt.username, info.mqtt_id, HTTP_USERNAME_LEN);
+        strncpy(bee.mqtt.password, info.mqtt_pw, HTTP_PASSWORD_LEN);
+        strncpy(bee.mqtt.server, info.mqtt_ip, HTTP_IP_LEN);
+        bee.mqtt.port = info.mqtt_port;
+        //FIXME topic get from cloud?
+        sprintf(bee.mqtt.topic, "client/%s/%s-HA", bee.mqtt.username, bee.mqtt.username);
+        PLOG(PLOG_LEVEL_INFO, "MQTT info\nIP:%s\nPort:%d\nID:%s\nPW:%s\n", bee.mqtt.server, bee.mqtt.port, bee.mqtt.username, bee.mqtt.password);
+        bee.status = BEE_GOT_INFO;
+        return BEE_API_OK;
+    }
+    return BEE_API_FAIL;
 }
 
 int bee_login(int type){
@@ -302,17 +329,10 @@ int bee_login(int type){
         bee.status = BEE_INIT;
         return BEE_API_FAIL;
     }
-    struct msg_service_info info;
-    if(sm_get_msg_info(type, bee.sm.session, &info) == 0){
-        strncpy(bee.mqtt.username, info.mqtt_id, HTTP_USERNAME_LEN);
-        strncpy(bee.mqtt.password, info.mqtt_pw, HTTP_PASSWORD_LEN);
-        strncpy(bee.mqtt.server, info.mqtt_ip, HTTP_IP_LEN);
-        bee.mqtt.port = info.mqtt_port;
-        //FIXME topic get from cloud?
-        sprintf(bee.mqtt.topic, "client/%s/%s-HA", bee.mqtt.username, bee.mqtt.username);
-        PLOG(PLOG_LEVEL_INFO, "MQTT info\nIP:%s\nPort:%d\nID:%s\nPW:%s\n", bee.mqtt.server, bee.mqtt.port, bee.mqtt.username, bee.mqtt.password);
+    bee.status = BEE_GET_INFO;
+    if(bee_get_msg_info() != BEE_API_OK){
+        bee.status = BEE_LOGIN;
     }
-    bee.status = BEE_LOGIN;
     return BEE_API_OK;
 }
 
@@ -337,7 +357,8 @@ int bee_connect(char *id)
 }
 int bee_send_message(char *id, void *data, unsigned long len, int type)
 {
-    int ret = -1;
+    int ret = BEE_API_NOT_LOGIN;
+    if(strlen(bee.sm.session) == 0) return BEE_API_NOT_LOGIN;
     size_t out_len;
     char *b64 = base64_encode(data, len, &out_len);
     if(b64){
@@ -363,10 +384,23 @@ int bee_send_data(char *id, int cid, void *data, unsigned long len, int type)
         tlv[7] = (int) ((len) & 0xff);
         memcpy(&tlv[8] , data, len);
         noly_hexdump(tlv, 8 + len );
-        bee_send_message(id, tlv, len + 8, type);
+        bee.error = bee_send_message(id, tlv, len + 8, type);
         free(tlv);
     }
     return BEE_API_OK;
+}
+
+int bee_mqtt_send(char *id, void *data, int len)
+{
+    size_t kk;
+    void *ddd = base64_encode(data, len, &kk);
+    if(ddd){
+        char jjj[1024];
+        int klen = sprintf(jjj, "{\"content\":\"%s\",\"src\":\"600000125\"}", ddd);
+        mosquitto_publish(bee.mqtt.mosq, NULL, "client/600000125/600000125-HA", klen, jjj, 0, 0);
+        free(ddd);
+    }
+
 }
 
 int bee_send_p2p(char *id, void *data, unsigned long len)
@@ -384,7 +418,8 @@ int bee_send_p2p(char *id, void *data, unsigned long len)
         tlv[7] = (int) ((len) & 0xff);
         memcpy(&tlv[8] , data, len);
         noly_hexdump(tlv, 8 + len );
-        bee_send_message(id, tlv, len + 8, SM_MSG_TYPE_RT);
+        //bee.error = bee_send_message(id, tlv, len + 8, SM_MSG_TYPE_RT);
+        //bee_mqtt_send(NULL, tlv, len + 8);//for test
         free(tlv);
     }
     return BEE_API_OK;
@@ -392,13 +427,24 @@ int bee_send_p2p(char *id, void *data, unsigned long len)
 
 int bee_message_handler(char *src, char *data)
 {
+    if(!src || !data) return BEE_API_PARAM_ERROR;
     PLOG(PLOG_LEVEL_DEBUG,"%s\n%s\n", src, data);
     size_t tlv_len;
     char *tlv = base64_decode(data, strlen(data), &tlv_len);
     if(tlv){
+        unsigned long len = (tlv[4] << 24) + (tlv[5] << 16) + (tlv[6] << 8) + tlv[7];
+        if(len != tlv_len - 8) {
+            PLOG(PLOG_LEVEL_WARN, "TLV data length not match!!!\n");
+        }
+        PLOG(PLOG_LEVEL_DEBUG, "Get TLV data length:%d\n", len);
+        noly_hexdump((unsigned char *)tlv, 16);
         if(tlv[1] == 0x01){//Data
+            memmove(&tlv[0], &tlv[8], len);
+            noly_hexdump((unsigned char *)tlv, 8);
         }else if(tlv[1] == 0x00){//SM
-            
+            memmove(&tlv[0], &tlv[8], len);
+            bee_sm_message_handler(tlv, len);
+            //noly_hexdump((unsigned char *)tlv, 16);
         }else{//P2P connection use
             PLOG(PLOG_LEVEL_INFO,"Bee library not support P2P mode reply something\n");
             char reply[] = "{\"cmd\":\"conn_reject\",\"reason\":\"not support\"}";
@@ -411,9 +457,23 @@ int bee_message_handler(char *src, char *data)
 
 int bee_reg_sm_cb(int (*callback)(void *data, int len))
 {
+    if(!callback) return BEE_API_PARAM_ERROR;
+    bee.sm_msg_cb = callback;
     return BEE_API_OK;
 }
 
+int bee_sm_message_handler(char *tlv, unsigned long tlv_len)
+{
+    if(!tlv || tlv_len < 1) return BEE_API_PARAM_ERROR;
+    tlv[tlv_len] = '\0';
+    PLOG(PLOG_LEVEL_INFO, "Recv Service Manager Command: %s\n", tlv);
+    if(bee.sm_msg_cb){
+        return bee.sm_msg_cb(tlv,tlv_len);
+    }else{
+        PLOG(PLOG_LEVEL_INFO, "Service Manager command callback not registered\n");
+    }
+    return 0;
+}
 int bee_reg_message_cb(int (*callback)(char *id, void *data, int len))
 {
     return BEE_API_OK;
@@ -421,11 +481,16 @@ int bee_reg_message_cb(int (*callback)(char *id, void *data, int len))
 
 void bee_check()
 {
-    if(bee.status == BEE_LOGIN && bee.mqtt.mosq == NULL)
+    if(bee.status == BEE_GOT_INFO && bee.mqtt.mosq == NULL)
     {
         if(bee_mqtt_start() == 0){
             bee.status = BEE_CONNECTING;
             bee.mqtt.sock = mosquitto_socket(bee.mqtt.mosq);
+        }
+    }else if(bee.status == BEE_LOGIN){
+        if(strlen(bee.mqtt.server)==0){
+            PLOG(PLOG_LEVEL_INFO,"MQTT info not get\n");
+            bee_get_msg_info();
         }
     }
 }
@@ -562,15 +627,24 @@ void *bee_main(void *data)
             PLOG(PLOG_LEVEL_DEBUG, "Periodically check\n");
             bee_check();
         }else if(ret < 0){
-            PLOG(PLOG_LEVEL_ERROR, "socket select error\n");
+            PLOG(PLOG_LEVEL_ERROR, "socket select error %d (%s)\n", ret , strerror(errno));
+            if(FD_ISSET(bee.local.sock, &rfs)){
+                PLOG(PLOG_LEVEL_ERROR, "local socket error\n");
+            }
+            if(FD_ISSET(bee.mqtt.sock, &rfs)){
+                PLOG(PLOG_LEVEL_ERROR, "MQTT socket error\n");
+            }
+            if(FD_ISSET(bee.event_sock, &rfs)){
+                PLOG(PLOG_LEVEL_ERROR, "event socket error\n");
+            }
             //FIXME handle mqtt socket error case
             bee_local_cli_handle(&rfs);
-            return 0;
+            //return 0;
         }else{
-            if(FD_ISSET(bee.event_sock, &rfs)){
+            if(bee.event_sock > 0 && FD_ISSET(bee.event_sock, &rfs)){
             }
             bee_mqtt_handler(&rfs, &wfs);
-            if(FD_ISSET(bee.local.sock, &rfs)){
+            if(bee.local.sock > 0 && FD_ISSET(bee.local.sock, &rfs)){
                 PLOG(PLOG_LEVEL_DEBUG, "Local client socket connected %d\n", bee.local.sock);
                 bee_local_serv_handle(bee.local.sock); 
             }

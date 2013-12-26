@@ -128,7 +128,7 @@ int http_send(struct http_data *hd, void *buf, int len, int timeout) {
     int ret = -1, sent = 0;
     struct timeval tv;
     tv.tv_sec = timeout;
-    tv.tv_usec = timeout;
+    tv.tv_usec = 0;
     if(hd->sk > 0){
         do{
             fd_set fset;
@@ -165,7 +165,7 @@ int http_recv(struct http_data *hd, void *buf, int len, int timeout) {
     int ret = -1;
     struct timeval tv;
     tv.tv_sec = timeout;
-    tv.tv_usec = timeout;
+    tv.tv_usec = 0;
     if(hd->sk > 0) {
         fd_set fset;
         FD_ZERO(&fset);
@@ -185,9 +185,10 @@ int http_recv(struct http_data *hd, void *buf, int len, int timeout) {
 
 int https_send(struct http_data *hd, void *buf, int len, int timeout) {
     int ret = -1, sent = 0;
+    int retry = 3;
     struct timeval tv;
     tv.tv_sec = timeout;
-    tv.tv_usec = timeout;
+    tv.tv_usec = 0;
     if(hd->sk > 0){
         do{
             fd_set fset;
@@ -199,9 +200,16 @@ int https_send(struct http_data *hd, void *buf, int len, int timeout) {
                 sent += ret;
             }else{
                 //FIXME add error handle break do while
-                PLOG(PLOG_LEVEL_DEBUG,"Error: send data failure %s\n", strerror(errno));
-                ret = -1;
-                break;
+                if(errno != -EAGAIN){
+                    if(retry == 0) break;
+                    PLOG(PLOG_LEVEL_WARN,"Send data failure %s\n", strerror(errno));
+                    retry --;
+                    ret = - HTTP_ERR_SEND;
+                }else{
+                    PLOG(PLOG_LEVEL_ERROR,"Send data failure %s\n", strerror(errno));
+                    ret = - HTTP_ERR_SEND;
+                    break;
+                }
             }
         }while(len > 0 && sent < len);
     }
@@ -215,12 +223,12 @@ int https_recv(struct http_data *hd, void *buf, int len, int timeout) {
     int ret = -1;
     struct timeval tv;
     tv.tv_sec = timeout;
-    tv.tv_usec = timeout;
-    PLOG(PLOG_LEVEL_DEBUG,"\n");
+    tv.tv_usec = 0;
     if(SSL_pending(hd->ssl) > 0) {
         ret = SSL_read(hd->ssl, buf, len);
         if(ret <= 0) {
             PLOG(PLOG_LEVEL_DEBUG,"Error: receive ssl data failure %s\n", strerror(errno));
+            ret = -HTTP_ERR_RECV;
         }
     }else{
         fd_set fset;
@@ -231,12 +239,18 @@ int https_recv(struct http_data *hd, void *buf, int len, int timeout) {
             ret = SSL_read(hd->ssl, buf, len);
             if(ret <= 0) {
                 PLOG(PLOG_LEVEL_DEBUG,"Error: receive data failure %s\n", strerror(errno));
+                ret = -HTTP_ERR_RECV;
             }
+        }else if(ret == 0){
+            PLOG(PLOG_LEVEL_DEBUG,"https recv select timeout\n");
+            ret = -HTTP_ERR_TIMEOUT;
         }else{
             if(errno != 0) {
                 PLOG(PLOG_LEVEL_DEBUG,"Error: select socket failure %d %s\n", errno, strerror(errno));
+                ret = -HTTP_ERR_RECV;
             }else{
                 PLOG(PLOG_LEVEL_DEBUG,"https recv select break\n");
+                ret = -HTTP_ERR_RECV;
             }
         }
     }
@@ -300,7 +314,7 @@ no_port:
     }
     return 0;
 err:
-    return -1;
+    return -HTTP_ERR_PARAM;
 }
 
 static int ca_verify_cb(int ok, X509_STORE_CTX *store)
@@ -327,13 +341,13 @@ int http_ssl_setup(struct http_data *hd) {
         SSL_load_error_strings();
         if(SSL_library_init() != 1) {
             PLOG(PLOG_LEVEL_DEBUG,"Error: SSL lib init failure\n");
-            return -1;
+            return -HTTP_ERR_SSL;
         }
         if((hd->ctx = SSL_CTX_new(SSLv3_method())) == NULL) {
             PLOG(PLOG_LEVEL_DEBUG,"Create SSLv3 failure\n");
             if((hd->ctx = SSL_CTX_new(TLSv1_method())) == NULL) {
                 PLOG(PLOG_LEVEL_DEBUG,"Create TLSv1 failure\n");
-                return -1;
+                return -HTTP_ERR_SSL;
             }
         }
         if(hd->cert_auth == 0){
@@ -342,7 +356,7 @@ int http_ssl_setup(struct http_data *hd) {
             SSL_CTX_set_verify(hd->ctx, SSL_VERIFY_PEER, ca_verify_cb);
             SSL_CTX_set_verify_depth(hd->ctx, SSL_DEPTH);
             if(SSL_CTX_load_verify_locations(hd->ctx, hd->cert_path, NULL) != 1) {
-                return -1;
+                return -HTTP_ERR_SSL;
             }
         }
         SSL_CTX_set_default_passwd_cb_userdata(hd->ctx, hd->passwd);
@@ -357,13 +371,13 @@ int http_ssl_setup(struct http_data *hd) {
         }
         if((hd->ssl = SSL_new(hd->ctx)) == NULL) {
             PLOG(PLOG_LEVEL_DEBUG,"Error: create SSL failure\n");
-            return -1;
+            return -HTTP_ERR_SSL;
         }
         if(SSL_set_fd(hd->ssl, hd->sk) != 1) {
             PLOG(PLOG_LEVEL_DEBUG,"Error: set SSL fd failure\n");
         }
         if(SSL_connect(hd->ssl) != 1) {
-            return -1;
+            return -HTTP_ERR_CONN;
         }
         PLOG(PLOG_LEVEL_DEBUG,"Connected to SSL success\n");
     return 0;
@@ -429,7 +443,7 @@ int http_set_user_pass(struct http_data *hd, char *user, char *pass)
         strncpy(hd->password, pass, HTTP_PASS_LEN);
         return 0;
     }
-    return -1;
+    return -HTTP_ERR_PARAM;
 }
 int http_copy_field(char *in, char *out, int len)
 {
@@ -444,7 +458,7 @@ int http_copy_field(char *in, char *out, int len)
         }
         return 0;
     }
-    return -1;
+    return -HTTP_ERR_PARAM;
 }
 int http_parse_auth(struct http_data *hd)
 {
@@ -492,12 +506,12 @@ int http_set_body(struct http_data *hd, void *data, int len) {
                 hd->body_send_len = len;
             }else{
                 PLOG(PLOG_LEVEL_DEBUG,"Out of memory\n");
-                return -1;
+                return -HTTP_ERR_OOM;
             }
         }
         return 0;
     }
-    return  -1;
+    return  -HTTP_ERR_PARAM;
 }
 int http_send_req(struct http_data *hd) {
     char    *header;
@@ -528,7 +542,7 @@ int http_send_req(struct http_data *hd) {
             PLOG(PLOG_LEVEL_DEBUG,"Data %d bytes send\n", send_byte );
         }else{
             PLOG(PLOG_LEVEL_DEBUG,"Out of memory\n");
-            return -1;
+            return -HTTP_ERR_OOM;
         }
 #ifdef DEBUG_HTTP
         PLOG(PLOG_LEVEL_DEBUG,">>>>>>>>>>>>>>>>>>\n%s>>>>>>>>>>>>>>>>>>\n", http_data);
@@ -648,7 +662,7 @@ int http_send_auth_req(struct http_data *hd) {
             PLOG(PLOG_LEVEL_DEBUG,"Data %d bytes send\n", send_byte);
         }else{
             PLOG(PLOG_LEVEL_DEBUG,"Out of memory\n");
-            return -1;
+            return -HTTP_ERR_OOM;
         }
 #ifdef DEBUG_HTTP
         PLOG(PLOG_LEVEL_DEBUG,">>>>>>>>>>>>>>>>>>\n%s>>>>>>>>>>>>>>>>>>\n", http_data);
@@ -706,7 +720,7 @@ int http_alloc_body_size(struct http_data *hd, int length){
         hd->http.body.size = length;
     }else if(hd->http.body.size - hd->http.body.offset < length){
         tmp = realloc(hd->http.body.start, hd->http.body.offset + length + 1);
-        if(tmp == NULL) return -1;
+        if(tmp == NULL) return -HTTP_ERR_OOM;
         hd->http.body.start = tmp;
         hd->http.body.size = hd->http.body.offset + length;
     }
@@ -734,11 +748,11 @@ int recv_http_header(struct http_data *hd) {
                 //FIXME if header is not completed
             }else if(len == 0){
                 PLOG(PLOG_LEVEL_DEBUG,"recv timeout\n");
-                ret = -1;
+                ret = -HTTP_ERR_TIMEOUT;
                 break;
             }else{
                 PLOG(PLOG_LEVEL_DEBUG,"Recv HTTP header failure \n%d  %d\n%s\n",len ,keep,hd->http.buf );
-                ret  = -1;
+                ret  = -HTTP_ERR_RECV;
                 break;
             }
         }else{
@@ -783,7 +797,7 @@ int http_recv_normal_body(struct http_data *hd) {
                     hd->http.body.size = hd->http.buf_offset;
                 }else{
                     PLOG(PLOG_LEVEL_DEBUG,"Out of memory\n");
-                    return -1;
+                    return -HTTP_ERR_OOM;
                 }
             }else{
                 //printf("copy data %s\n", hd->http.buf);
@@ -841,7 +855,7 @@ int http_recv_chunked_body(struct http_data *hd) {
                     hd->http.body.size = hd->http.buf_offset;
                 }else{
                     PLOG(PLOG_LEVEL_DEBUG,"Out of memory\n");
-                    return -1;
+                    return -HTTP_ERR_OOM;
                 }
             }else{
                 tmp = realloc(hd->http.body.start, hd->http.body.size + hd->http.buf_offset +1);
@@ -851,7 +865,7 @@ int http_recv_chunked_body(struct http_data *hd) {
                     hd->http.body.size += hd->http.buf_offset;
                 }else{
                     PLOG(PLOG_LEVEL_DEBUG,"Out of memory\n");
-                    return -1;
+                    return -HTTP_ERR_OOM;
                 }
             }
         }else{//parse if body end
@@ -873,7 +887,7 @@ int http_recv_chunked_body(struct http_data *hd) {
                     break;
                 }else if(length < 0 || errno == ERANGE){
                     PLOG(PLOG_LEVEL_DEBUG,"Decode chunk error\n");
-                    return -1;
+                    return -HTTP_ERR_DECODE;
                 }else{//still chunk keep find \r\n
                     ptr = newline;
                     newline = strstr(ptr, "\r\n");
@@ -893,6 +907,7 @@ int http_recv_chunked_body(struct http_data *hd) {
                         hd->http.body.size += rest_len;
                     }else{
                         PLOG(PLOG_LEVEL_DEBUG,"Out of memory\n");
+                        ret = -HTTP_ERR_OOM;
                     }
                     break;
                 }
@@ -909,6 +924,7 @@ int http_recv_chunked_body(struct http_data *hd) {
                         hd->http.body.size += hd->http.buf_offset;
                     }else{
                         PLOG(PLOG_LEVEL_DEBUG,"Out of memory\n");
+                        ret = -HTTP_ERR_OOM;
                     }
                 }
             }
@@ -962,7 +978,7 @@ int http_decode_chunk_body(struct http_data *hd){
                 ptr = newline;
             }
         }else{
-            return -1;
+            return -HTTP_ERR_OOM;
         }
     }
     return ret;
@@ -997,7 +1013,7 @@ int http_recv_resp(struct http_data *hd) {
         memset(buf, 0, HTTP_RECV_BUF);
         if ((ret = recv_http_header(hd) ) < 0 ){
             PLOG(PLOG_LEVEL_DEBUG,"Header receive failure\n");
-            return -1;
+            return ret;
         }
         http_find_header(hd, "Content-Length", content_len);
         http_find_header(hd, "Transfer-Encoding", encode_type);
@@ -1009,7 +1025,7 @@ int http_recv_resp(struct http_data *hd) {
                 return 0;
             }else{
                 PLOG(PLOG_LEVEL_DEBUG,"http receive body error\n");
-                return -1;
+                return -HTTP_ERR_RECV;
             }
         }else if(strncmp(encode_type, "chunked", 7) == 0){
             hd->http.chunked = 1;
@@ -1020,15 +1036,15 @@ int http_recv_resp(struct http_data *hd) {
                         //PLOG(PLOG_LEVEL_DEBUG, "chunked length %d\n",hd->http.content_len);
                         return 0;
                     }else{
-                        return -1;
+                        return -HTTP_ERR_DECODE;
                     }
                 }else{
                     PLOG(PLOG_LEVEL_DEBUG,"http decode chunk body error\n");
-                    return -1;
+                    return -HTTP_ERR_DECODE;
                 }
             }else{
                 PLOG(PLOG_LEVEL_DEBUG,"http receive chunk body error\n");
-                return -1;
+                return -HTTP_ERR_DECODE;
             }
             //TODO parse chunk data
             PLOG(PLOG_LEVEL_DEBUG,"Parse chunked data here\n");
@@ -1056,7 +1072,7 @@ int http_perform(struct http_data *hd) {
     server = gethostbyname(hd->uri.host);
     if(server == NULL) {
         PLOG(PLOG_LEVEL_DEBUG,"Error: Gethostbyname failure\n");
-        return -1;
+        return -HTTP_ERR_CONN;
     }
     memcpy(&(hd->srv_addr.sin_addr), server->h_addr, sizeof(hd->srv_addr.sin_addr));
     hd->srv_addr.sin_family = AF_INET;
@@ -1064,7 +1080,7 @@ int http_perform(struct http_data *hd) {
     hd->sk = socket(AF_INET, SOCK_STREAM, 0);
     if(hd->sk < 0) {
         PLOG(PLOG_LEVEL_DEBUG,"Error: create socket failure %d\n", hd->sk);
-        return -1;
+        return -HTTP_ERR_SOCKET;
     }
     //http_nonblock_socket(hd->sk);
     http_socket_sendtimeout(hd->sk, HTTP_TIMEOUT);
@@ -1073,13 +1089,13 @@ int http_perform(struct http_data *hd) {
          errno != EINPROGRESS) {
         PLOG(PLOG_LEVEL_DEBUG,"Error: Cannot connect to server\n");
         destroy_http(hd);
-        return -1;
+        return -HTTP_ERR_CONN;
     }
     if(hd->uri.proto == PROTO_HTTPS) {
         if(http_ssl_setup(hd) == -1){
             destroy_ssl(hd);
             destroy_http(hd);
-            return -1;
+            return -HTTP_ERR_SSL;
         }
     }
     struct http_data *hd2 = NULL;

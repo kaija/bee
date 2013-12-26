@@ -34,7 +34,7 @@
 
 #define FILE_PATH_LEN	        128
 
-#define HTTP_TIMEOUT	        3
+#define HTTP_TIMEOUT	        1
 #define HTTP_SEND_TIMEOUT	    1
 #define HTTP_KEEP_TIMEOUT       3
 
@@ -48,7 +48,19 @@
 #define LOG
 #endif
 
-
+enum{
+    HTTP_OK,
+    HTTP_ERR_TIMEOUT,
+    HTTP_ERR_CONN,
+    HTTP_ERR_SEND,
+    HTTP_ERR_RECV,
+    HTTP_ERR_PARAM,
+    HTTP_ERR_SSL,
+    HTTP_ERR_OOM,
+    HTTP_ERR_DECODE,
+    HTTP_ERR_SOCKET,
+    HTTP_ERR_UNKNOWN
+};
 
 enum{
 	PROTO_HTTP,
