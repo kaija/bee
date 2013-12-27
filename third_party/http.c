@@ -30,6 +30,12 @@ struct http_data *http_create() {
     return hd;
 }
 
+int http_socket_reuseaddr(int sk)
+{
+	int on = 1;
+    return setsockopt(sk, SOL_SOCKET, SO_REUSEADDR, (const char *) &on, sizeof(on));
+}
+
 void http_socket_sendtimeout(int sk, int timeout)
 {
     struct timeval tv;
@@ -185,7 +191,6 @@ int http_recv(struct http_data *hd, void *buf, int len, int timeout) {
 
 int https_send(struct http_data *hd, void *buf, int len, int timeout) {
     int ret = -1, sent = 0;
-    int retry = 3;
     struct timeval tv;
     tv.tv_sec = timeout;
     tv.tv_usec = 0;
@@ -201,9 +206,7 @@ int https_send(struct http_data *hd, void *buf, int len, int timeout) {
             }else{
                 //FIXME add error handle break do while
                 if(errno != -EAGAIN){
-                    if(retry == 0) break;
                     PLOG(PLOG_LEVEL_WARN,"Send data failure %s\n", strerror(errno));
-                    retry --;
                     ret = - HTTP_ERR_SEND;
                 }else{
                     PLOG(PLOG_LEVEL_ERROR,"Send data failure %s\n", strerror(errno));
@@ -1082,6 +1085,7 @@ int http_perform(struct http_data *hd) {
         PLOG(PLOG_LEVEL_DEBUG,"Error: create socket failure %d\n", hd->sk);
         return -HTTP_ERR_SOCKET;
     }
+	http_socket_reuseaddr(hd->sk);
     //http_nonblock_socket(hd->sk);
     http_socket_sendtimeout(hd->sk, HTTP_TIMEOUT);
     http_socket_recvtimeout(hd->sk, HTTP_TIMEOUT);
@@ -1130,7 +1134,6 @@ int http_perform(struct http_data *hd) {
                         http_parse_auth(hd);
                         ret = http_send_auth_req(hd);
                         if(ret == 0) {
-                            usleep(100000);
                             ret = http_recv_resp(hd);
                             if(ret == 0){
                                 return 0;

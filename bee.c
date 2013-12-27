@@ -18,6 +18,7 @@
 static struct bee_struct bee = {
     .run = BEE_FALSE,
     .mqtt.mosq = NULL,
+    .mqtt.sock = -1,
     .mqtt.security = 0,
     .local.sock = 0,
     .sm_msg_cb = NULL,
@@ -29,6 +30,7 @@ int bee_login(int type);
 int bee_mqtt_start();
 int bee_message_handler(char *src, char *data);
 int bee_sm_message_handler(char *tlv, unsigned long tlv_len);
+int bee_status_change_handler(int status);
 /* ===============================================
  *     Mosquitto callback area
  */
@@ -44,7 +46,7 @@ void bee_mqtt_connect_callback(struct mosquitto *mosq, void *obj, int result)
 
 void bee_mqtt_subscribe_callback(struct mosquitto *mosq, void *obj, int mid, int qos_count, const int *granted_qos)
 {
-    bee.status = BEE_CONNECTED;
+    bee_status_change_handler(BEE_CONNECTED);
     PLOG(PLOG_LEVEL_INFO,"Subscribed (mid: %d): %d", mid, granted_qos[0]);
 }
 
@@ -83,7 +85,10 @@ void bee_mqtt_message_callback(struct mosquitto *mosq, void *obj, const struct m
         PLOG(PLOG_LEVEL_DEBUG,"Drop unknown message\n");
     }
 }
-
+void bee_mqtt_disconnect_callback(struct mosquitto *mosq, void *obj, int err)
+{
+    PLOG(PLOG_LEVEL_INFO, "MQTT disconnect\n");
+}
 int bee_mqtt_start()
 {
     int rc = 0;
@@ -108,6 +113,7 @@ int bee_mqtt_start()
     mosquitto_connect_callback_set(bee.mqtt.mosq, bee_mqtt_connect_callback);
     mosquitto_message_callback_set(bee.mqtt.mosq, bee_mqtt_message_callback);
     mosquitto_subscribe_callback_set(bee.mqtt.mosq, bee_mqtt_subscribe_callback);
+    mosquitto_disconnect_callback_set(bee.mqtt.mosq, bee_mqtt_disconnect_callback);
     rc = mosquitto_connect(bee.mqtt.mosq, bee.mqtt.server, bee.mqtt.port, bee.mqtt.keepalive);
     if(rc){
         if(rc == MOSQ_ERR_ERRNO){
@@ -400,7 +406,7 @@ int bee_mqtt_send(char *id, void *data, int len)
         mosquitto_publish(bee.mqtt.mosq, NULL, "client/600000125/600000125-HA", klen, jjj, 0, 0);
         free(ddd);
     }
-
+    return 0;
 }
 
 int bee_send_p2p(char *id, void *data, unsigned long len)
@@ -418,7 +424,7 @@ int bee_send_p2p(char *id, void *data, unsigned long len)
         tlv[7] = (int) ((len) & 0xff);
         memcpy(&tlv[8] , data, len);
         noly_hexdump(tlv, 8 + len );
-        //bee.error = bee_send_message(id, tlv, len + 8, SM_MSG_TYPE_RT);
+        bee.error = bee_send_message(id, tlv, len + 8, SM_MSG_TYPE_RT);
         //bee_mqtt_send(NULL, tlv, len + 8);//for test
         free(tlv);
     }
@@ -488,7 +494,7 @@ void bee_check()
             bee.mqtt.sock = mosquitto_socket(bee.mqtt.mosq);
         }
     }else if(bee.status == BEE_LOGIN){
-        if(strlen(bee.mqtt.server)==0){
+        if(strlen(bee.mqtt.server) == 0){
             PLOG(PLOG_LEVEL_INFO,"MQTT info not get\n");
             bee_get_msg_info();
         }
@@ -586,6 +592,23 @@ int bee_local_serv_handle(int sock)
     return 0;
 }
 
+int bee_reg_status_cb(int (*status_cb)(int status))
+{
+    bee.sm_status_cb = status_cb;
+    return 0;
+}
+
+int bee_status_change_handler(int status)
+{
+    if(status == BEE_CONNECTED){
+        bee.status = BEE_CONNECTED;
+    }
+    if(bee.sm_status_cb){
+        bee.sm_status_cb(status);
+    }
+    return 0;
+}
+
 void *bee_main(void *data)
 {
     struct timeval tv;
@@ -624,7 +647,7 @@ void *bee_main(void *data)
         max = MAX(max, bee_local_cli_fd_set(&rfs));// add local client socket
         int ret = select(max+1, &rfs, &wfs, NULL, &tv);
         if(ret == 0){
-            PLOG(PLOG_LEVEL_DEBUG, "Periodically check\n");
+            //PLOG(PLOG_LEVEL_DEBUG, "Periodically check\n");
             bee_check();
         }else if(ret < 0){
             PLOG(PLOG_LEVEL_ERROR, "socket select error %d (%s)\n", ret , strerror(errno));
@@ -642,6 +665,7 @@ void *bee_main(void *data)
             //return 0;
         }else{
             if(bee.event_sock > 0 && FD_ISSET(bee.event_sock, &rfs)){
+                PLOG(PLOG_LEVEL_DEBUG, "event socket select\n");
             }
             bee_mqtt_handler(&rfs, &wfs);
             if(bee.local.sock > 0 && FD_ISSET(bee.local.sock, &rfs)){

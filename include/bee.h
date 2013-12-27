@@ -137,6 +137,8 @@ struct bee_struct {
     int                 event_sock;
     int                 (*msg_cb)(char *, void *, int);
     int                 (*sm_msg_cb)(void *, int);
+	int					(*sm_status_cb)(int status);
 };
+int bee_reg_status_cb(int (*status_cb)(int status));
 
 #endif
