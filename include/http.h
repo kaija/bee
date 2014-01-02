@@ -34,9 +34,9 @@
 
 #define FILE_PATH_LEN	        128
 
-#define HTTP_TIMEOUT	        1
-#define HTTP_SEND_TIMEOUT	    1
-#define HTTP_KEEP_TIMEOUT       3
+#define HTTP_TIMEOUT            10
+#define HTTP_SEND_TIMEOUT       10
+#define HTTP_KEEP_TIMEOUT       10
 
 #define SSL_DEPTH 		        1
 #define SSL_KEY_PW_LEN	        64

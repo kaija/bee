@@ -28,7 +28,7 @@
 
 
 #define BEE_TOPIC_LEN   128
-#define BEE_KEEPALIVE   60
+#define BEE_KEEPALIVE   30
 
 #define BEE_TIMEOUT_S   0
 #define BEE_TIMEOUT_US  500*1000
@@ -137,7 +137,7 @@ struct bee_struct {
     int                 event_sock;
     int                 (*msg_cb)(char *, void *, int);
     int                 (*sm_msg_cb)(void *, int);
-	int					(*sm_status_cb)(int status);
+    int                 (*sm_status_cb)(int status);
 };
 int bee_reg_status_cb(int (*status_cb)(int status));
 

@@ -20,7 +20,8 @@ int a()
 int status_cb(int status)
 {
     if(status == BEE_CONNECTED){
-        bee_send_p2p("600000125", "asdfghjk", 8);
+        //bee_send_p2p("600000125", "asdfghjk", 8);
+        bee_send_conn_req("600000125");
     }
 }
 
@@ -31,7 +32,9 @@ int b()
     bee_reg_status_cb(status_cb);
     if(bee_dev_login_id_pw("f835dd000003", "gemtek") == BEE_API_OK){
     }
-    sleep(100);
+    while(1){
+        sleep(1);
+    }
     return 0;
 }
 

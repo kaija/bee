@@ -145,7 +145,7 @@ int bee_mqtt_handler(fd_set *rfs, fd_set *wfs)
             return rc;
         }
     }
-    return 0;
+    return mosquitto_loop_misc(mosq);
 }
 /* ===============================================
  * BEE config function
@@ -431,6 +431,28 @@ int bee_send_p2p(char *id, void *data, unsigned long len)
     return BEE_API_OK;
 }
 
+int bee_send_conn_req(char *id)
+{
+    char data[128];
+    int len = snprintf(data, 128, "{\"cmd\":\"conn_req\",\"type\":\"msg\",\"src\":\"%s\"}", bee.sm.uid);
+    unsigned char *tlv = malloc(len + 8);
+    if(tlv){
+        tlv[0] = 0x00;
+        tlv[1] = 0x05;
+        tlv[2] = 0x00;
+        tlv[3] = 0x00;
+        tlv[4] = (int) ((len>>24) & 0xff);
+        tlv[5] = (int) ((len>>16) & 0xff);
+        tlv[6] = (int) ((len>>8) & 0xff);
+        tlv[7] = (int) ((len) & 0xff);
+        memcpy(&tlv[8] , data, len);
+        noly_hexdump(tlv, 8 + len );
+        bee.error = bee_send_message(id, tlv, len + 8, SM_MSG_TYPE_RT);
+        free(tlv);
+    }
+    return BEE_API_OK;
+}
+
 int bee_message_handler(char *src, char *data)
 {
     if(!src || !data) return BEE_API_PARAM_ERROR;
@@ -451,14 +473,22 @@ int bee_message_handler(char *src, char *data)
             memmove(&tlv[0], &tlv[8], len);
             bee_sm_message_handler(tlv, len);
             //noly_hexdump((unsigned char *)tlv, 16);
+        }else if(tlv[1] == 0x05){//Message type connection
+            bee_conn_message_handler(src, &tlv[8], len);
         }else{//P2P connection use
             PLOG(PLOG_LEVEL_INFO,"Bee library not support P2P mode reply something\n");
             char reply[] = "{\"cmd\":\"conn_reject\",\"reason\":\"not support\"}";
-            bee_send_p2p(src, reply, strlen(reply));
+            //bee_send_p2p(src, reply, strlen(reply));
         }
         free(tlv);
     }
-    return 0;
+    return BEE_API_OK;
+}
+
+int bee_conn_message_handler(char *src, char *data, int len)
+{
+    PLOG(PLOG_LEVEL_INFO, "Recv message connection request %s\n", data);
+    return BEE_API_OK;
 }
 
 int bee_reg_sm_cb(int (*callback)(void *data, int len))
@@ -636,7 +666,7 @@ void *bee_main(void *data)
             FD_SET(bee.local.sock, &rfs);
             max = MAX(bee.local.sock, max);
         }
-        if(bee.mqtt.sock > 0){
+        if((bee.status == BEE_CONNECTED || bee.status == BEE_CONNECTING)&& (bee.mqtt.sock = mosquitto_socket(bee.mqtt.mosq)) > 0){
             FD_SET(bee.mqtt.sock, &rfs);
             struct mosquitto *mosq = bee.mqtt.mosq;
             if(mosq->out_packet || mosq->current_out_packet){
@@ -647,20 +677,28 @@ void *bee_main(void *data)
         max = MAX(max, bee_local_cli_fd_set(&rfs));// add local client socket
         int ret = select(max+1, &rfs, &wfs, NULL, &tv);
         if(ret == 0){
-            //PLOG(PLOG_LEVEL_DEBUG, "Periodically check\n");
+            PLOG(PLOG_LEVEL_DEBUG, "Periodically check\n");
             bee_check();
+            if (bee_mqtt_handler(&rfs, &wfs) != MOSQ_ERR_SUCCESS){
+                mosquitto_reconnect(bee.mqtt.mosq);
+            }
         }else if(ret < 0){
             PLOG(PLOG_LEVEL_ERROR, "socket select error %d (%s)\n", ret , strerror(errno));
-            if(FD_ISSET(bee.local.sock, &rfs)){
+            if(bee.local.sock > 0 && FD_ISSET(bee.local.sock, &rfs)){
+                close(bee.local.sock);
+                bee.local.sock = 0;
                 PLOG(PLOG_LEVEL_ERROR, "local socket error\n");
             }
-            if(FD_ISSET(bee.mqtt.sock, &rfs)){
+            if(bee.mqtt.sock > 0 && FD_ISSET(bee.mqtt.sock, &rfs)){
+                close(bee.mqtt.sock);
+                bee.mqtt.sock = 0;
                 PLOG(PLOG_LEVEL_ERROR, "MQTT socket error\n");
             }
-            if(FD_ISSET(bee.event_sock, &rfs)){
+            if(bee.event_sock > 0 && FD_ISSET(bee.event_sock, &rfs)){
+                close(bee.event_sock);
+                bee.event_sock = 0;
                 PLOG(PLOG_LEVEL_ERROR, "event socket error\n");
             }
-            //FIXME handle mqtt socket error case
             bee_local_cli_handle(&rfs);
             //return 0;
         }else{
@@ -676,6 +714,7 @@ void *bee_main(void *data)
             //TODO check socket one by one
         }
     }
+    PLOG(PLOG_LEVEL_DEBUG, "Library thread end\n");
     if(bee.event_sock > 0) {
         close(bee.event_sock);
         bee.event_sock = 0;
