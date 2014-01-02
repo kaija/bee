@@ -63,7 +63,7 @@ static char *plogger_level_text(int level)
 int plogger_rotate()
 {
     char new_file[PLOG_PATH_LEN];
-    fclose(plog.fp);
+    if(plog.fp) fclose(plog.fp);
     snprintf(new_file,PLOG_PATH_LEN,"%s.1",plog.path);
     rename(plog.path, new_file);
     printf("File rotate\n");

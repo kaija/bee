@@ -31,6 +31,7 @@ int bee_mqtt_start();
 int bee_message_handler(char *src, char *data);
 int bee_sm_message_handler(char *tlv, unsigned long tlv_len);
 int bee_status_change_handler(int status);
+int bee_conn_message_handler(char *src, char *data, int len);
 /* ===============================================
  *     Mosquitto callback area
  */
@@ -220,12 +221,19 @@ int bee_dev_init()
     bee_init(SM_TYPE_DEVICE);
     return BEE_API_OK;
 }
-
+int bee_default_conn_cb(char *remote, int cid, int status)
+{
+    if(remote){
+        PLOG(PLOG_LEVEL_INFO, "Accept remote %s connection by default\n", remote);
+    }
+    return BEE_CONN_ACCEPT;
+}
 int bee_init(int type)
 {
     list_init(&bee.local.client);
     plogger_set_path("/tmp/p2p.log");
     plogger_enable_file(PLOG_LEVEL_INFO);
+    plogger_enable_screen(PLOG_LEVEL_INFO);
     bee.type = type;
     bee.mqtt.will = BEE_FALSE;
     bee.mqtt.qos = 1;
@@ -234,6 +242,7 @@ int bee_init(int type)
     bee.mqtt.retain = 0;
     bee.mqtt.keepalive = BEE_KEEPALIVE; // Default 60 sec keepalive
     bee.mqtt.clean_sess = BEE_TRUE;
+    bee.conn_cb = bee_default_conn_cb;
     if(pthread_mutex_init(&bee.api_lock, NULL) != 0){
         PLOG(PLOG_LEVEL_ERROR, "API lock init error\n");
     }
@@ -389,7 +398,7 @@ int bee_send_data(char *id, int cid, void *data, unsigned long len, int type)
         tlv[6] = (int) ((len>>8) & 0xff);
         tlv[7] = (int) ((len) & 0xff);
         memcpy(&tlv[8] , data, len);
-        noly_hexdump(tlv, 8 + len );
+        //noly_hexdump(tlv, 8 + len );
         bee.error = bee_send_message(id, tlv, len + 8, type);
         free(tlv);
     }
@@ -398,13 +407,15 @@ int bee_send_data(char *id, int cid, void *data, unsigned long len, int type)
 
 int bee_mqtt_send(char *id, void *data, int len)
 {
-    size_t kk;
-    void *ddd = base64_encode(data, len, &kk);
-    if(ddd){
-        char jjj[1024];
-        int klen = sprintf(jjj, "{\"content\":\"%s\",\"src\":\"600000125\"}", ddd);
-        mosquitto_publish(bee.mqtt.mosq, NULL, "client/600000125/600000125-HA", klen, jjj, 0, 0);
-        free(ddd);
+    size_t sz;
+    char *b64 = base64_encode(data, len, &sz);
+    if(b64){
+        char json[1024];
+        int klen = sprintf(json, "{\"content\":\"%s\",\"src\":\"%s\"}", b64, bee.sm.uid);
+        char topic[256];
+        sprintf(topic, "client/%s/%s-HA", id, id);
+        mosquitto_publish(bee.mqtt.mosq, NULL, topic, klen, json, 0, 0);
+        free(b64);
     }
     return 0;
 }
@@ -423,7 +434,7 @@ int bee_send_p2p(char *id, void *data, unsigned long len)
         tlv[6] = (int) ((len>>8) & 0xff);
         tlv[7] = (int) ((len) & 0xff);
         memcpy(&tlv[8] , data, len);
-        noly_hexdump(tlv, 8 + len );
+        //noly_hexdump(tlv, 8 + len );
         bee.error = bee_send_message(id, tlv, len + 8, SM_MSG_TYPE_RT);
         //bee_mqtt_send(NULL, tlv, len + 8);//for test
         free(tlv);
@@ -446,13 +457,38 @@ int bee_send_conn_req(char *id)
         tlv[6] = (int) ((len>>8) & 0xff);
         tlv[7] = (int) ((len) & 0xff);
         memcpy(&tlv[8] , data, len);
-        noly_hexdump(tlv, 8 + len );
+        //noly_hexdump(tlv, 8 + len );
         bee.error = bee_send_message(id, tlv, len + 8, SM_MSG_TYPE_RT);
         free(tlv);
     }
     return BEE_API_OK;
 }
-
+int bee_send_conn_resp(char *id, int resp)
+{
+    char data[128];
+    int len = 0; 
+    if(resp == BEE_CONN_ACCEPT){
+        len = snprintf(data, 128, "{\"cmd\":\"conn_resp\",\"type\":\"msg\",\"src\":\"%s\", \"result\":\"accept\"}", bee.sm.uid);
+    }else{
+        len = snprintf(data, 128, "{\"cmd\":\"conn_resp\",\"type\":\"msg\",\"src\":\"%s\", \"result\":\"reject\"}", bee.sm.uid);
+    }
+    unsigned char *tlv = malloc(len + 8);
+    if(tlv){
+        tlv[0] = 0x00;
+        tlv[1] = 0x05;
+        tlv[2] = 0x00;
+        tlv[3] = 0x00;
+        tlv[4] = (int) ((len>>24) & 0xff);
+        tlv[5] = (int) ((len>>16) & 0xff);
+        tlv[6] = (int) ((len>>8) & 0xff);
+        tlv[7] = (int) ((len) & 0xff);
+        memcpy(&tlv[8] , data, len);
+        //noly_hexdump(tlv, 8 + len );
+        bee.error = bee_send_message(id, tlv, len + 8, SM_MSG_TYPE_RT);
+        free(tlv);
+    }
+    return BEE_API_OK;
+}
 int bee_message_handler(char *src, char *data)
 {
     if(!src || !data) return BEE_API_PARAM_ERROR;
@@ -465,10 +501,10 @@ int bee_message_handler(char *src, char *data)
             PLOG(PLOG_LEVEL_WARN, "TLV data length not match!!!\n");
         }
         PLOG(PLOG_LEVEL_DEBUG, "Get TLV data length:%d\n", len);
-        noly_hexdump((unsigned char *)tlv, 16);
+        //noly_hexdump((unsigned char *)tlv, 16);
         if(tlv[1] == 0x01){//Data
             memmove(&tlv[0], &tlv[8], len);
-            noly_hexdump((unsigned char *)tlv, 8);
+            //noly_hexdump((unsigned char *)tlv, 8);
         }else if(tlv[1] == 0x00){//SM
             memmove(&tlv[0], &tlv[8], len);
             bee_sm_message_handler(tlv, len);
@@ -477,7 +513,7 @@ int bee_message_handler(char *src, char *data)
             bee_conn_message_handler(src, &tlv[8], len);
         }else{//P2P connection use
             PLOG(PLOG_LEVEL_INFO,"Bee library not support P2P mode reply something\n");
-            char reply[] = "{\"cmd\":\"conn_reject\",\"reason\":\"not support\"}";
+            //char reply[] = "{\"cmd\":\"conn_reject\",\"reason\":\"not support\"}";
             //bee_send_p2p(src, reply, strlen(reply));
         }
         free(tlv);
@@ -488,6 +524,24 @@ int bee_message_handler(char *src, char *data)
 int bee_conn_message_handler(char *src, char *data, int len)
 {
     PLOG(PLOG_LEVEL_INFO, "Recv message connection request %s\n", data);
+    char cmd[BEE_CMD_LEN];
+    if(json_str_get_obj(data, "cmd", cmd, BEE_CMD_LEN) == 0){
+        if(strncmp(cmd, "conn_req",strlen("conn_req"))==0){
+            if(bee.conn_cb(src, -1, BEE_CONN_REQUEST) == BEE_CONN_ACCEPT){
+                bee_send_conn_resp(src, BEE_CONN_ACCEPT);
+            }else{
+                bee_send_conn_resp(src, BEE_CONN_REJECT);
+            }
+        }else if(strncmp(cmd, "conn_resp",strlen("conn_resp"))==0){
+            if(json_str_get_obj(data, "result", cmd, BEE_CMD_LEN) == 0){
+                if(strncmp(cmd, "accept",strlen("accept"))==0){
+                    bee.conn_cb(src, -1, BEE_CONN_ACCEPT);
+                }else{
+                    bee.conn_cb(src, -1, BEE_CONN_REJECT);
+                }
+            }
+        }
+    }
     return BEE_API_OK;
 }
 
@@ -512,6 +566,7 @@ int bee_sm_message_handler(char *tlv, unsigned long tlv_len)
 }
 int bee_reg_message_cb(int (*callback)(char *id, void *data, int len))
 {
+    bee.msg_cb = callback;
     return BEE_API_OK;
 }
 
@@ -624,17 +679,21 @@ int bee_local_serv_handle(int sock)
 
 int bee_reg_status_cb(int (*status_cb)(int status))
 {
-    bee.sm_status_cb = status_cb;
+    bee.status_cb = status_cb;
     return 0;
 }
-
+int bee_reg_connection_cb(int (*conn_cb)(char *remote, int cid, int status))
+{
+    bee.conn_cb = conn_cb;
+    return 0;
+}
 int bee_status_change_handler(int status)
 {
     if(status == BEE_CONNECTED){
         bee.status = BEE_CONNECTED;
     }
-    if(bee.sm_status_cb){
-        bee.sm_status_cb(status);
+    if(bee.status_cb){
+        bee.status_cb(status);
     }
     return 0;
 }
@@ -677,7 +736,7 @@ void *bee_main(void *data)
         max = MAX(max, bee_local_cli_fd_set(&rfs));// add local client socket
         int ret = select(max+1, &rfs, &wfs, NULL, &tv);
         if(ret == 0){
-            PLOG(PLOG_LEVEL_DEBUG, "Periodically check\n");
+            //PLOG(PLOG_LEVEL_DEBUG, "Periodically check\n");
             bee_check();
             if (bee_mqtt_handler(&rfs, &wfs) != MOSQ_ERR_SUCCESS){
                 mosquitto_reconnect(bee.mqtt.mosq);

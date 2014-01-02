@@ -25,10 +25,10 @@
 #define BEE_SRV_CLI     10      //max service client
 
 #define BEE_LOCALHOST   "localhost"
-
+#define BEE_CMD_LEN     32
 
 #define BEE_TOPIC_LEN   128
-#define BEE_KEEPALIVE   30
+#define BEE_KEEPALIVE   60
 
 #define BEE_TIMEOUT_S   0
 #define BEE_TIMEOUT_US  500*1000
@@ -55,7 +55,12 @@ enum{
     BEE_NOT_LOGIN,
     BEE_OOM
 };
-
+enum{
+    BEE_CONN_REJECT,    //Message connection reject
+    BEE_CONN_ACCEPT,     //Message connection accept
+    BEE_CONN_REQUEST,
+    BEE_CONN_DISCONN
+};
 enum{
     BEE_API_OK,
     BEE_API_FAIL,
@@ -137,8 +142,10 @@ struct bee_struct {
     int                 event_sock;
     int                 (*msg_cb)(char *, void *, int);
     int                 (*sm_msg_cb)(void *, int);
-    int                 (*sm_status_cb)(int status);
+    int                 (*status_cb)(int status);
+    int                 (*conn_cb)(char *remote, int cid, int status);
 };
 int bee_reg_status_cb(int (*status_cb)(int status));
+int bee_reg_connection_cb(int (*conn_cb)(char *remote, int cid, int status));
 
 #endif

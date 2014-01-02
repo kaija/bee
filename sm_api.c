@@ -278,7 +278,7 @@ int sm_send_msg(char *sess ,char *dst, char *api_key, char *msg, int type) {
     hb = http_post(url, body, body_len, HTTP_POST);
     //hb = http_post("https://www-dev.securepilot.com/msg/v1/send",body, 1);
     if(hb) {
-        PLOG(PLOG_LEVEL_INFO, "body\n%s\n", hb->body);
+        PLOG(PLOG_LEVEL_DEBUG, "body\n%s\n", hb->body);
         if(hb->body){
             if(body_get_field(hb->body, "code", ret_code, HTTP_RET_LEN)!=-1){
                 sm_ret_code_handler("unknow", ret_code);
