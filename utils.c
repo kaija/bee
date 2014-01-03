@@ -110,6 +110,7 @@ void noly_hexdump(unsigned char *start, int len)
         printf("%02X ", start[i]);
         if((i+1) % 8 == 0) printf("\n");
     }
+    printf("\n");
 }
 
 int noly_socket_set_reuseaddr(int sk)

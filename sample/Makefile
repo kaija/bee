@@ -1,4 +1,4 @@
-CFLAGS= -I../include
+CFLAGS= -I../include -Wall
 LDFLAGS= ../lib/libbee.a ../../mosquitto/lib/libmosquitto.a -lssl -lpthread
 
 .PHONY: all test1 test2 test_api

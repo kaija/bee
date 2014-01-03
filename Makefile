@@ -9,9 +9,16 @@ LIB_OBJS+= third_party/parson.o
 LIB_OBJS+= third_party/http.o
 LIB_OBJS+= third_party/log.o
 
+VERFILE=VERSION
+ifneq ("$(wildcard $(VERFILE))","")
+VERSION=$(shell cat VERSION)
+else
+VERSION=$(shell git log -1 --pretty="%H")
+endif
 
 CFLAGS= -fPIC -Wall -I./include -I../mosquitto/lib
 CFLAGS+= -DHAVE_OPENSSL
+CFLAGS+= -DBEE_VERSION="\"${VERSION}\""
 LDFLAGS=
 SHARED_LIB=lib/libbee.so
 STATIC_LIB=lib/libbee.a

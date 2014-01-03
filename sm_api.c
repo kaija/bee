@@ -273,7 +273,7 @@ int sm_send_msg(char *sess ,char *dst, char *api_key, char *msg, int type) {
         if(session) free(session);
         if(dest) free(dest);
     }
-    PLOG(PLOG_LEVEL_INFO, "SEND BODY |%s|\n", body);
+    PLOG(PLOG_LEVEL_DEBUG, "SEND BODY |%s|\n", body);
     snprintf(url, HTTP_URL_LEN, "%s/mec_msg/v1/send",SM_API_SERVER);
     hb = http_post(url, body, body_len, HTTP_POST);
     //hb = http_post("https://www-dev.securepilot.com/msg/v1/send",body, 1);
@@ -310,7 +310,7 @@ char *sm_get_msg(char *sess, char *api_key, int serial) {
     hb = http_post(url, body, body_len, HTTP_POST);
     if(hb) {
         if(hb->body){
-            PLOG(PLOG_LEVEL_DEBUG, "body\n%s\n", hb->body);
+            PLOG(PLOG_LEVEL_DEBUG, "head %s\nbody\n%s\n", body, hb->body);
             if(body_get_field(hb->body, "code", ret_code, HTTP_RET_LEN)!=-1){
                 res = malloc(hb->len+1);
                 if(res){

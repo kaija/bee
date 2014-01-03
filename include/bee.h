@@ -1,3 +1,10 @@
+/**
+ * @file	bee.h
+ * @brief 	bee real time message library
+ * @author 	Kevin Chang kevin_chang@gemteks.com
+ * @date	2014/01/03
+ */
+
 #ifndef __BEE_H
 #define __BEE_H
 #include <pthread.h>
@@ -7,6 +14,8 @@
 #ifndef INVALID_SOCKET
 #define INVALID_SOCKET (-1)
 #endif
+
+#define BEE_VER_LEN     16
 
 #define BEE_TRUE        1
 #define BEE_FALSE       0
@@ -33,12 +42,16 @@
 #define BEE_TIMEOUT_S   0
 #define BEE_TIMEOUT_US  500*1000
 
+#define BEE_LOCAL_TIMEO 100
 #define BEE_PKT_SIZE    1500
 
 #define BEE_MSG_SIZE    16*1024
 
+#define bee_hexdump     noly_hexdump
+
+/*! library status enum */
 enum{
-    BEE_INIT,
+    BEE_INIT,                   /*!< library initial status */
     BEE_LOGINING,
     BEE_LOGIN,
     BEE_GET_INFO,
@@ -128,6 +141,7 @@ struct local_serv {
 };
 
 struct bee_struct {
+    char                version[BEE_VER_LEN];
     pthread_t           bee_thread;
     pthread_mutex_t     api_lock;
     struct sm_account   sm;
@@ -140,12 +154,49 @@ struct bee_struct {
     int                 error;  //error code
     int                 event_port;
     int                 event_sock;
-    int                 (*msg_cb)(char *, void *, int);
+    int                 (*msg_cb)(char *,int,  void *, int);
     int                 (*sm_msg_cb)(void *, int);
     int                 (*status_cb)(int status);
     int                 (*conn_cb)(char *remote, int cid, int status);
 };
+/**
+ * @name    bee_get_version
+ * @brief   get bee library version
+ * @return  version string
+ */
+char *bee_get_version();
+void bee_get_uid(char *uid);
+int bee_user_init();
+int bee_dev_init();
+int bee_user_login_id_pw(char *id, char *pw);
+int bee_user_login_cert(char *cert_path, char *pkey_path, char *pw);
+
+int bee_dev_login_id_pw(char *id, char *pw);
+int bee_dev_login_cert(char *cert_path, char *pkey_path, char *pw);
+int bee_get_access_token(char *token);
+int bee_set_service(char *api_key, char *api_sec);
+
+int bee_logout();
+int bee_destroy();
+
+int bee_connect(char *id);
+int bee_send_data(char *id, int cid, void *data, unsigned long len, int type);
+
+int bee_log_level(int level);
+int bee_log_to_file(int level, char *path);
+
+int bee_add_user(char *user, char *dev_info, char *user_key);
+int bee_del_user();
+struct bee_nbr *bee_get_nbr_list();
+int bee_discover_nbr();
+int bee_delete_nbr_list();
+
+
+int bee_reg_sm_cb(int (*callback)(void *data, int len));
+int bee_reg_message_cb(int (*callback)(char *id, int cid, void *data, int len));
 int bee_reg_status_cb(int (*status_cb)(int status));
 int bee_reg_connection_cb(int (*conn_cb)(char *remote, int cid, int status));
+
+void noly_hexdump(unsigned char *start, int len);
 
 #endif
