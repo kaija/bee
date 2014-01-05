@@ -24,15 +24,20 @@ static struct bee_struct bee = {
     .local.sock = 0,
     .sm_msg_cb = NULL,
     .msg_cb = NULL,
+    .app_cb = NULL,
+    .app_timeout = 0,
 };
 void *bee_main(void *data);
 int bee_init(int type);
 int bee_login(int type);
 int bee_mqtt_start();
+int bee_ssdp_update();
 int bee_message_handler(char *src, char *data);
 int bee_sm_message_handler(char *tlv, unsigned long tlv_len);
 int bee_status_change_handler(int status);
 int bee_conn_message_handler(char *src, char *data, int len);
+int bee_send_conn_req(char *id);
+int bee_init_without_thread(int type);
 /* ===============================================
  *     Mosquitto callback area
  */
@@ -168,9 +173,14 @@ char *bee_get_version()
     return bee.version;
 }
 
-void bee_get_uid(char *uid)
+void bee_get_uid(char *uid, int len)
 {
+    if(uid) strncpy(uid, bee.sm.uid ,len);
+}
 
+void bee_set_uid(char *uid)
+{
+    if(uid) strncpy(bee.sm.uid , uid,SM_UID_LEN);
 }
 
 int bee_log_level(int level)
@@ -188,7 +198,16 @@ int bee_log_to_file(int level, char *path)
  */
 int bee_add_user(char *user, char *dev_info, char *user_key)
 {
-    return BEE_API_OK;
+    int ret = 0;
+    if(user_key){
+        ret = sm_add_user(bee.sm.session, user, NULL, bee.sm.api_key, bee.sm.api_sec, user_key);
+    }else{
+        ret = sm_add_user(bee.sm.session, user, NULL, bee.sm.api_key, bee.sm.api_sec, "false");
+    }
+    if(ret == 0)
+        return BEE_API_OK;
+    else
+        return BEE_API_FAIL;
 }
 
 int bee_del_user()
@@ -228,17 +247,75 @@ int bee_user_init()
     return BEE_API_OK;
 }
 
+int bee_user_init_v2()
+{
+    bee_init_without_thread(SM_TYPE_USER);
+    return BEE_API_OK;
+}
+
 int bee_dev_init()
 {
     bee_init(SM_TYPE_DEVICE);
     return BEE_API_OK;
 }
+
+int bee_dev_init_v2()
+{
+    bee_init_without_thread(SM_TYPE_DEVICE);
+    return BEE_API_OK;
+}
+
 int bee_default_conn_cb(char *remote, int cid, int status)
 {
     if(remote){
         PLOG(PLOG_LEVEL_INFO, "Accept remote %s connection by default\n", remote);
     }
     return BEE_CONN_ACCEPT;
+}
+
+int bee_init_without_thread(int type)
+{
+
+    list_init(&bee.local.client);
+    plogger_set_path("/tmp/p2p.log");
+    plogger_enable_file(PLOG_LEVEL_INFO);
+    plogger_enable_screen(PLOG_LEVEL_DEBUG);
+    bee.type = type;
+    bee.mqtt.will = BEE_FALSE;
+    bee.mqtt.qos = 1;
+    bee.status = BEE_INIT;
+    bee.mqtt.debug = BEE_TRUE;
+    bee.mqtt.retain = 0;
+    bee.mqtt.keepalive = BEE_KEEPALIVE; // Default 60 sec keepalive
+    bee.mqtt.clean_sess = BEE_TRUE;
+    bee.conn_cb = bee_default_conn_cb;
+    if(pthread_mutex_init(&bee.api_lock, NULL) != 0){
+        PLOG(PLOG_LEVEL_ERROR, "API lock init error\n");
+    }
+    if(bee.ssdp.sock == 0){
+        lssdp_get_iface(NULL);
+        bee.ssdp.sock = lssdp_create_socket();
+        if(bee.ssdp.sock < 0) {
+            bee.error = BEE_SSDP_ERROR;
+            return BEE_API_FAIL;
+        }
+    }
+    if(bee.local.sock == 0){
+        bee.local.sock = noly_tcp_socket(BEE_SRV_PORT, BEE_SRV_CLI);
+        if(bee.local.sock < 0){
+            bee.error = BEE_SOCKET_ERROR;
+            PLOG(PLOG_LEVEL_ERROR,"Local socket create failure (%d)%s\n", errno, strerror(errno));
+            return BEE_API_FAIL;
+        }
+        PLOG(PLOG_LEVEL_INFO, "Local Service Socket created %d\n", BEE_SRV_PORT);
+    }
+    return BEE_API_OK;
+}
+int bee_loop_forever()
+{
+    bee.run = BEE_TRUE;
+    bee_main((void *) &bee);
+    return BEE_API_OK;
 }
 int bee_init(int type)
 {
@@ -259,6 +336,7 @@ int bee_init(int type)
         PLOG(PLOG_LEVEL_ERROR, "API lock init error\n");
     }
     if(bee.ssdp.sock == 0){
+        lssdp_get_iface(NULL);
         bee.ssdp.sock = lssdp_create_socket();
         if(bee.ssdp.sock < 0) {
             bee.error = BEE_SSDP_ERROR;
@@ -362,10 +440,10 @@ int bee_login(int type){
     }
     return BEE_API_OK;
 }
-int bee_get_access_token(char *token)
+int bee_get_access_token(char *token, int len)
 {
     if(strlen(bee.sm.session) > 0){
-        strncpy(token, bee.sm.session ,SM_SESS_LEN);
+        strncpy(token, bee.sm.session ,len);
         return BEE_API_OK;
     }
     return BEE_API_FAIL;
@@ -572,6 +650,18 @@ int bee_conn_message_handler(char *src, char *data, int len)
     return BEE_API_OK;
 }
 
+int bee_reg_app_cb(void (*callback)(), int timeout)
+{
+    if(callback){
+        bee.app_timeout = timeout;
+        bee.app_cb = callback;
+    }else{
+        bee.app_timeout = 0;
+        bee.app_cb = NULL;
+    }
+    return BEE_API_OK;
+}
+
 int bee_reg_sm_cb(int (*callback)(void *data, int len))
 {
     if(!callback) return BEE_API_PARAM_ERROR;
@@ -680,6 +770,7 @@ int bee_local_safe_read(int fd, unsigned long timeout)//timeout in ms
     return total;
 }
 
+
 int bee_local_cli_handle(fd_set *fs)
 {
     int size = list_size(&bee.local.client);
@@ -712,6 +803,7 @@ int bee_local_cli_fd_set(fd_set *fs)
     }
     return max;
 }
+
 int bee_local_serv_handle(int sock)
 {
     struct sockaddr_in cli;
@@ -749,9 +841,50 @@ int bee_status_change_handler(int status)
     }
     return 0;
 }
-
+int bee_network_update()
+{
+    bee_ssdp_update();
+    return BEE_API_OK;
+}
+int bee_ssdp_update()
+{
+    if(strlen(bee.ssdp.ssdp_st) > 0){
+        lssdp_set_service(bee.ssdp.ssdp_st, bee.sm.username, bee.sm.uid, BEE_SRV_PORT, "P2P");
+        lssdp_delete_list(bee.ssdp.ssdp_st);
+        lssdp_request_service(bee.ssdp.ssdp_st);
+    }else{
+        lssdp_set_service(BEE_SRV_TYPE, bee.sm.username, bee.sm.uid, BEE_SRV_PORT, "P2P");
+        lssdp_delete_list(BEE_SRV_TYPE);
+        lssdp_request_service(BEE_SRV_TYPE);
+    }
+    return BEE_API_OK;
+}
+int bee_ssdp_set_st(char *st)
+{
+    if(st){
+        strncpy(bee.ssdp.ssdp_st, st, BEE_SSDP_ST_LEN);
+        return BEE_API_OK;
+    }
+    return BEE_API_PARAM_ERROR;
+}
+int bee_ssdp_handler(int sock)
+{
+    struct sockaddr_in sender;
+    socklen_t sender_len;
+    char pkt[SSDP_MAX_PKT_LEN];
+    size_t pkt_len;
+    memset(pkt, '\0', sizeof(pkt));
+    sender_len = sizeof(struct sockaddr_in);
+    pkt_len = recvfrom(sock, pkt, sizeof(pkt), 0, (struct sockaddr *)&sender, &sender_len);
+    if(pkt_len > 0){
+        lssdp_process_packet(sock, (struct sockaddr *)&sender, pkt, pkt_len);
+    }
+    return 0;
+}
 void *bee_main(void *data)
 {
+    time_t app_next_timeout = 0, now = time(NULL);
+    time_t ssdp_timeout = time(NULL) + BEE_SSDP_INTERVAL;
     struct timeval tv;
     fd_set rfs,wfs;
     int max = 0;
@@ -777,6 +910,10 @@ void *bee_main(void *data)
             FD_SET(bee.local.sock, &rfs);
             max = MAX(bee.local.sock, max);
         }
+        if(bee.ssdp.sock > 0) {
+            FD_SET(bee.ssdp.sock, &rfs);
+            max = MAX(bee.ssdp.sock, max);
+        }
         if((bee.status == BEE_CONNECTED || bee.status == BEE_CONNECTING)&& (bee.mqtt.sock = mosquitto_socket(bee.mqtt.mosq)) > 0){
             FD_SET(bee.mqtt.sock, &rfs);
             struct mosquitto *mosq = bee.mqtt.mosq;
@@ -785,13 +922,27 @@ void *bee_main(void *data)
             }
             max = MAX(bee.mqtt.sock, max);
         }
+        if(bee.app_cb && bee.app_timeout > 0){//for user register callback
+            now = time(NULL);
+            if(app_next_timeout != 0 && now >= app_next_timeout){
+                bee.app_cb();
+                app_next_timeout = now + bee.app_timeout;
+            }else if(app_next_timeout == 0){
+                app_next_timeout = now + bee.app_timeout;
+            }
+        }
         max = MAX(max, bee_local_cli_fd_set(&rfs));// add local client socket
         int ret = select(max+1, &rfs, &wfs, NULL, &tv);
         if(ret == 0){
-            //PLOG(PLOG_LEVEL_DEBUG, "Periodically check\n");
+            now = time(NULL);
+            PLOG(PLOG_LEVEL_DEBUG, "Periodically check\n");
             bee_check();
             if (bee_mqtt_handler(&rfs, &wfs) != MOSQ_ERR_SUCCESS){
                 mosquitto_reconnect(bee.mqtt.mosq);
+            }
+            if(now > ssdp_timeout){
+                bee_ssdp_update();
+                ssdp_timeout = now + BEE_SSDP_INTERVAL;
             }
         }else if(ret < 0){
             PLOG(PLOG_LEVEL_ERROR, "socket select error %d (%s)\n", ret , strerror(errno));
@@ -816,6 +967,10 @@ void *bee_main(void *data)
             if(bee.event_sock > 0 && FD_ISSET(bee.event_sock, &rfs)){
                 PLOG(PLOG_LEVEL_DEBUG, "event socket select\n");
             }
+            if(bee.ssdp.sock > 0 && FD_ISSET(bee.ssdp.sock, &rfs)){
+                PLOG(PLOG_LEVEL_DEBUG, "SSDP socket select\n");
+                bee_ssdp_handler(bee.ssdp.sock);
+            }
             bee_mqtt_handler(&rfs, &wfs);
             if(bee.local.sock > 0 && FD_ISSET(bee.local.sock, &rfs)){
                 PLOG(PLOG_LEVEL_DEBUG, "Local client socket connected %d\n", bee.local.sock);
@@ -833,6 +988,10 @@ void *bee_main(void *data)
     if(bee.local.sock > 0) {
         close(bee.local.sock);
         bee.local.sock = 0;
+    }
+    if(bee.ssdp.sock > 0) {
+        close(bee.ssdp.sock);
+        bee.ssdp.sock = 0;
     }
     if(bee.mqtt.mosq) {
         mosquitto_disconnect(bee.mqtt.mosq);

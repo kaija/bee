@@ -1,8 +1,8 @@
 CFLAGS= -I../include -Wall
 LDFLAGS= ../lib/libbee.a ../../mosquitto/lib/libmosquitto.a -lssl -lpthread
 
-.PHONY: all test1 test2 test_api
-all: test1 test2 test_api sensor
+.PHONY: all test1 test2 test_api nothread
+all: test1 test2 test_api sensor nothread
 
 test1: test1.o
 	$(CC) -o test1.exe test1.o $(CFLAGS) $(LDFLAGS)
@@ -13,6 +13,8 @@ test_api: test_api.o
 
 sensor: sensor.o
 	$(CC) -o sensor.exe sensor.o $(CFLAGS) $(LDFLAGS)
+nothread: nothread.o
+	$(CC) -o nothread.exe nothread.o $(CFLAGS) $(LDFLAGS)
 
 clean:
 	rm *.o  test1.exe -rf

@@ -32,6 +32,7 @@
 #define BEE_SSDP_ST_LEN 64
 #define BEE_SRV_PORT    5678
 #define BEE_SRV_CLI     10      //max service client
+#define BEE_SSDP_INTERVAL     10      // ssdp update interval
 
 #define BEE_LOCALHOST   "localhost"
 #define BEE_CMD_LEN     32
@@ -158,6 +159,8 @@ struct bee_struct {
     int                 (*sm_msg_cb)(void *, int);
     int                 (*status_cb)(int status);
     int                 (*conn_cb)(char *remote, int cid, int status);
+    void                (*app_cb)();
+    int                 app_timeout;
 };
 /**
  * @name    bee_get_version
@@ -165,15 +168,85 @@ struct bee_struct {
  * @return  version string
  */
 char *bee_get_version();
-void bee_get_uid(char *uid);
+/**
+ * @name    bee_get_uid
+ * @brief   get account uid
+ * @param   uid     the uid buffer
+ * @param   len     the buffer length
+ */
+void bee_get_uid(char *uid, int len);
+
+/**
+ * @name    bee_set_uid
+ * @brief   set account uid
+ * @param   uid     the uid buffer
+ */
+void bee_set_uid(char *uid);
+/**
+ * @name    bee_user_init
+ * @brief   initial the library for user type use
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_user_init();
+/**
+ * @name    bee_dev_init
+ * @brief   initial the library for device type use
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_dev_init();
+
+/**
+ * @name    bee_user_login_id_pw
+ * @brief   login cloud with user's id/ pw
+ * @param   id      the account id
+ * @param   pw      the account password
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_user_login_id_pw(char *id, char *pw);
+
+/**
+ * @name    bee_user_login_cert
+ * @brief   user login cloud with certificate
+ * @param   cert_path the certificate path
+ * @param   pkey_path the private key path
+ * @param   pw        the private key password
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_user_login_cert(char *cert_path, char *pkey_path, char *pw);
 
+/**
+ * @name    bee_dev_login_id_pw
+ * @brief   login cloud with device's id/ pw
+ * @param   id      the account id
+ * @param   pw      the account password
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_dev_login_id_pw(char *id, char *pw);
+
+/**
+ * @name    bee_dev_login_cert
+ * @brief   device login cloud with certificate
+ * @param   cert_path the certificate path
+ * @param   pkey_path the private key path
+ * @param   pw        the private key password
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_dev_login_cert(char *cert_path, char *pkey_path, char *pw);
-int bee_get_access_token(char *token);
+
+/**
+ * @name    bee_get_access_token
+ * @brief   get cloud access token
+ * @param   token     the token buffer
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_get_access_token(char *token, int len);
 int bee_set_service(char *api_key, char *api_sec);
 
 int bee_logout();
