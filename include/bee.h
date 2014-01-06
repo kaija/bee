@@ -50,6 +50,9 @@
 
 #define bee_hexdump     noly_hexdump
 
+#define BEE_DATA_TYPE_RELIABLE    SM_MSG_TYPE_DEFAULT
+#define BEE_DATA_TYPE_REALTIME    SM_MSG_TYPE_RT
+
 /*! library status enum */
 enum{
     BEE_INIT,                   /*!< library initial status */
@@ -59,7 +62,7 @@ enum{
     BEE_GOT_INFO,
     BEE_CONNECTING,
     BEE_CONNECTED,
-    BEE_DISCONNETED,
+    BEE_DISCONNECTED,
     BEE_ERROR
 };
 
@@ -188,6 +191,13 @@ void bee_set_uid(char *uid);
  * @retval  0       success
  * @retval  <0      error with error code
  */
+int bee_user_init_v2();
+/**
+ * @name    bee_user_init_v2
+ * @brief   initial the library for user type use and no thread created
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_user_init();
 /**
  * @name    bee_dev_init
@@ -196,6 +206,13 @@ int bee_user_init();
  * @retval  <0      error with error code
  */
 int bee_dev_init();
+/**
+ * @name    bee_dev_init_v2
+ * @brief   initial the library for device type use and no thread created
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_dev_init_v2();
 
 /**
  * @name    bee_user_login_id_pw
@@ -240,6 +257,14 @@ int bee_dev_login_id_pw(char *id, char *pw);
 int bee_dev_login_cert(char *cert_path, char *pkey_path, char *pw);
 
 /**
+ * @name    bee_loop_forever
+ * @brief   start connect to server.
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_loop_forever();
+
+/**
  * @name    bee_get_access_token
  * @brief   get cloud access token
  * @param   token     the token buffer
@@ -247,29 +272,168 @@ int bee_dev_login_cert(char *cert_path, char *pkey_path, char *pw);
  * @retval  <0      error with error code
  */
 int bee_get_access_token(char *token, int len);
+
+/**
+ * @name    bee_set_service
+ * @brief   set the cloud service type
+ * @param   api_key the cloud service api key
+ * @param   api_sec the cloud service api secret
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_set_service(char *api_key, char *api_sec);
 
+/**
+ * @name    bee_logout
+ * @brief   logout the from cloud service
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_logout();
+
+/**
+ * @name    bee_destroy
+ * @brief   logout service and destroy all.
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_destroy();
 
+/**
+ * @name    bee_connect
+ * @brief   connect to remote user/device
+ * @param   id      the remote user/device id
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_connect(char *id);
+/**
+ * @name    bee_send_data
+ * @brief   send data to remote user/device
+ * @param   id      the remote user/device id
+ * @param   cid     local connection id
+ * @param   data    the data buffer
+ * @param   len     the data buffer length
+ * @param   type    the send type  BEE_DATA_TYPE_RELIABLE  /  BEE_DATA_TYPE_REALTIME
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_send_data(char *id, int cid, void *data, unsigned long len, int type);
 
+/**
+ * @name    bee_log_level
+ * @brief   change the log display level.
+ * @param   level   the log level  PLOG_LEVEL_DEBUG -> PLOG_LEVEL_FATAL
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_log_level(int level);
+
+/**
+ * @name    bee_log_to_file
+ * @brief   log to file.
+ * @param   level   the log level  PLOG_LEVEL_DEBUG -> PLOG_LEVEL_FATAL
+ * @param   path    the log path
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_log_to_file(int level, char *path);
 
+/**
+ * @name    bee_add_user
+ * @brief   device add user to allow list
+ * @param   user    the remote user id (uid)
+ * @param   dev_info
+ * @param   user_key    the shared key between user and device
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_add_user(char *user, char *dev_info, char *user_key);
-int bee_del_user();
+
+/**
+ * @name    bee_del_user
+ * @brief   delete user from device.
+ * @param   user    the remote user id (uid)
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_del_user(char *user);
+
+/**
+ * @name    bee_get_nbr_list
+ * @brief   get neighbor list from SSDP
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 struct bee_nbr *bee_get_nbr_list();
+
+/**
+ * @name    bee_discover_nbr
+ * @brief   send a neighbor discover.
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_discover_nbr();
+
+/**
+ * @name    bee_delete_nbr_list
+ * @brief   delete neighbor list
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_delete_nbr_list();
 
 
+/**
+ * @name    bee_reg_sm_cb
+ * @brief   register service manager message callback
+ * @param   callback callback function
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_reg_sm_cb(int (*callback)(void *data, int len));
+/**
+ * @name    bee_reg_app_cb
+ * @brief   register a user defined callback
+ * @param   callback    the callback function
+ * @param   timeout     the time interval between callback.
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_reg_app_cb(void (*callback)(), int timeout);
+/**
+ * @name    bee_reg_message_cb
+ * @brief   register data message callback
+ * @param   callback the callback function for data message
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_reg_message_cb(int (*callback)(char *id, int cid, void *data, int len));
+/**
+ * @name    bee_reg_status_cb
+ * @brief   register library status change callback
+ * @param   callback    the status change callback
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_reg_status_cb(int (*status_cb)(int status));
+/**
+ * @name    bee_reg_connection_cb
+ * @brief   register data connection callback
+ * @param   conn_cb     the connection status callback.
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 int bee_reg_connection_cb(int (*conn_cb)(char *remote, int cid, int status));
 
+/**
+ * @name    noly_hexdump
+ * @brief   hex dump function for debug
+ * @param   start   the pointer to the data
+ * @param   len     the data length
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
 void noly_hexdump(unsigned char *start, int len);
 
 #endif

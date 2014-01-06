@@ -105,10 +105,12 @@ void bee_mqtt_message_callback(struct mosquitto *mosq, void *obj, const struct m
 void bee_mqtt_disconnect_callback(struct mosquitto *mosq, void *obj, int err)
 {
     PLOG(PLOG_LEVEL_INFO, "MQTT disconnect\n");
+    bee_status_change_handler(BEE_DISCONNECTED);
 }
 int bee_mqtt_start()
 {
     int rc = 0;
+    PLOG(PLOG_LEVEL_INFO,"MQTT connecting to %s:%d\n", bee.mqtt.server, bee.mqtt.port);
     bee.mqtt.mosq = mosquitto_new(bee.mqtt.username, bee.mqtt.clean_sess, &bee);
     if(!bee.mqtt.mosq) {
         switch (errno){
@@ -137,11 +139,14 @@ int bee_mqtt_start()
             PLOG(PLOG_LEVEL_ERROR, "%s\n", strerror(errno));
         }else{
             PLOG(PLOG_LEVEL_ERROR, "Unable to connect (%d)\n",rc);
+            goto err;
         }
     }
     return 0;
 err:
     mosquitto_lib_cleanup();
+    mosquitto_destroy(bee.mqtt.mosq);
+    bee.mqtt.mosq = NULL;
     return -1;
 }
 int bee_mqtt_handler(fd_set *rfs, fd_set *wfs)
@@ -210,23 +215,27 @@ int bee_add_user(char *user, char *dev_info, char *user_key)
         return BEE_API_FAIL;
 }
 
-int bee_del_user()
+int bee_del_user(char *user)
 {
+    //TODO
     return BEE_API_OK;
 }
 
 struct bee_nbr *bee_get_nbr_list()
 {
+    //TODO
     return NULL;
 }
 
 int bee_discover_nbr()
 {
+    //TODO
     return BEE_API_OK;
 }
 
 int bee_delete_nbr_list()
 {
+    //TODO
     return BEE_API_OK;
 }
 
@@ -700,6 +709,8 @@ void bee_check()
             PLOG(PLOG_LEVEL_INFO,"MQTT info not get\n");
             bee_get_msg_info();
         }
+    }else if(bee.status == BEE_CONNECTING){
+            PLOG(PLOG_LEVEL_INFO,"MQTT still connecting\n");
     }
 }
 
