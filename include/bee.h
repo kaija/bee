@@ -12,43 +12,43 @@
 #include "simclist.h"
 
 #ifndef INVALID_SOCKET
-#define INVALID_SOCKET (-1)
+#define INVALID_SOCKET          (-1)
 #endif
 
-#define BEE_VER_LEN     16
+#define BEE_VER_LEN             16
 
-#define BEE_TRUE        1
-#define BEE_FALSE       0
+#define BEE_TRUE                1
+#define BEE_FALSE               0
 
-#define BEE_ID_LEN      64
-#define BEE_IP_LEN      32
+#define BEE_ID_LEN              64
+#define BEE_IP_LEN              32
 
-#define BEE_NAME_LEN    32
-#define BEE_URL_LEN     256
+#define BEE_NAME_LEN            32
+#define BEE_URL_LEN             256
 
-#define BEE_SESS_LEN    128
+#define BEE_SESS_LEN            128
 
-#define BEE_SRV_TYPE    "ST_P2P"
-#define BEE_SSDP_ST_LEN 64
-#define BEE_SRV_PORT    5678
-#define BEE_SRV_CLI     10      //max service client
-#define BEE_SSDP_INTERVAL     10      // ssdp update interval
+#define BEE_SRV_TYPE            "ST_P2P"
+#define BEE_SSDP_ST_LEN         64
+#define BEE_SRV_PORT            5678
+#define BEE_SRV_CLI             10
+#define BEE_SSDP_INTERVAL       10      // ssdp update interval
 
-#define BEE_LOCALHOST   "localhost"
-#define BEE_CMD_LEN     32
+#define BEE_LOCALHOST           "localhost"
+#define BEE_CMD_LEN             32
 
-#define BEE_TOPIC_LEN   128
-#define BEE_KEEPALIVE   60
+#define BEE_TOPIC_LEN           128
+#define BEE_KEEPALIVE           60
 
-#define BEE_TIMEOUT_S   0
-#define BEE_TIMEOUT_US  500*1000
+#define BEE_TIMEOUT_S           0
+#define BEE_TIMEOUT_US          500*1000
 
-#define BEE_LOCAL_TIMEO 100
-#define BEE_PKT_SIZE    1500
+#define BEE_LOCAL_TIMEO         100
+#define BEE_PKT_SIZE            1500
 
-#define BEE_MSG_SIZE    16*1024
+#define BEE_MSG_SIZE            16*1024
 
-#define bee_hexdump     noly_hexdump
+#define bee_hexdump             noly_hexdump
 
 #define BEE_DATA_TYPE_RELIABLE    SM_MSG_TYPE_DEFAULT
 #define BEE_DATA_TYPE_REALTIME    SM_MSG_TYPE_RT

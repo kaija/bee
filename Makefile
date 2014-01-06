@@ -25,8 +25,10 @@ STATIC_LIB=lib/libbee.a
 
 .PHONY: shared static sample
 
-all: shared static sample
+all: prepare shared static sample
 
+prepare:
+	mkdir -p lib
 shared: $(LIB_OBJS)
 	$(CC) -shared -o $(SHARED_LIB) $(LIB_OBJS) $(CFLAGS)
 static: $(LIB_OBJS)

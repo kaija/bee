@@ -1,3 +1,9 @@
+/**
+ * @file	bee.c
+ * @brief 	bee real time message library
+ * @author 	Kevin Chang kevin_chang@gemteks.com
+ * @date	2014/01/03
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
