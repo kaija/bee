@@ -26,7 +26,7 @@ static struct bee_struct bee = {
     .run = BEE_FALSE,
     .mqtt.mosq = NULL,
     .mqtt.sock = -1,
-    .mqtt.security = 0,
+    .mqtt.security = 1,
     .local.sock = 0,
     .sm_msg_cb = NULL,
     .msg_cb = NULL,
@@ -477,10 +477,17 @@ int bee_destroy()
     return BEE_API_OK;
 }
 
+char *bee_get_ssdp_st(){
+    if(strlen(bee.ssdp.ssdp_st) > 0)
+        return bee.ssdp.ssdp_st;
+    return BEE_SRV_TYPE;
+}
 int bee_connect(char *id)
 {
     int ret = BEE_API_OK;
     //FIXME add local tcp socket handle
+    lssdp_service_list_t *local_list;
+    local_list = lssdp_list_service(bee_get_ssdp_st());
     ret = bee_send_conn_req(id);
     return ret;
 }

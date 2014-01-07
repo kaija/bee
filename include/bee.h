@@ -90,6 +90,7 @@ struct bee_nbr
 {
     char                id[BEE_ID_LEN];
     char                ip[BEE_IP_LEN];
+    int                 port;
     char                name[BEE_NAME_LEN];
     struct bee_nbr      *next;
 };
