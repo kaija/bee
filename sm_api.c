@@ -576,19 +576,19 @@ char *SM_SHA1(char *api_secret, time_t now){
     printf("SHA1 %s\n", sm_sha1);
     return sm_sha1;
 }
-int sm_get_user_list(char *mac, char *api_key, char *api_sec, char ***result, int *user_num) {
+int sm_get_user_list(char *token, char *api_key, void **result, int *user_num) {
     char url[HTTP_URL_LEN];
-    if(!mac || !api_key || !api_sec ) return -1;
+    if(!api_key || !token) return -1;
     int res = -1;
     struct http_body *hb;
     int body_len = 0;
     char body[HTTP_BODY_SIZE];
     memset(body, 0, HTTP_BODY_SIZE);
-    time_t now = time(NULL);
-    body_len = snprintf(body, HTTP_BODY_SIZE, "device_id=%s&api_key=%s&api_token=%s&time=%ld", mac, api_key, SM_SHA1(api_sec, now), now);
+    body_len = snprintf(body, HTTP_BODY_SIZE, "token=%s&api_key=%s", token, api_key);
     snprintf(url, HTTP_URL_LEN, "%s/v1/device/get_user_list",SM_API_SERVER);
     hb = http_post(url, body, body_len, HTTP_POST);
     if(hb) {
+        //printf("body\n%s\n",hb->body);
         JSON_Value *js_value = NULL;
         JSON_Object *js_object, *js_sub_object;
         JSON_Array *js_array;
@@ -599,15 +599,18 @@ int sm_get_user_list(char *mac, char *api_key, char *api_sec, char ***result, in
             js_array = json_object_get_array(js_object, "user_list");
             array_size = json_array_get_count(js_array);
             *user_num = array_size;
-            *result = (char **)malloc(array_size*sizeof(char *));
             if(js_array != NULL){
+                *result = malloc(sizeof(struct sm_user_profile) * array_size);
+                sprintf(*result, "123456\n");
+                memset(*result, 0, sizeof(struct sm_user_profile) * array_size);
+                struct sm_user_profile *users = *result;
                 for(i = 0; i < array_size; i++){
-                    //FIXME check null pointer
-                    (*result)[i] = (char *)malloc(HTTP_USERNAME_LEN);
-                    memset((*result)[i], 0, HTTP_USERNAME_LEN);
                     js_sub_object = json_array_get_object(js_array, i);
-                    const char *str = json_object_get_string(js_sub_object, "uid");
-                    memcpy((*result)[i], str, HTTP_USERNAME_LEN);
+                    const char *uid = json_object_get_string(js_sub_object, "uid");
+                    const char *user_key = json_object_get_string(js_sub_object, "key");
+                    strcpy(users->uid, uid);
+                    if(user_key) strcpy(users->user_key, user_key);
+                    users++;
                 }
                 res = 0;
             }

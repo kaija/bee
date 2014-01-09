@@ -42,6 +42,7 @@ enum{
 
 #define HTTP_USERNAME_LEN   64
 #define HTTP_PASSWORD_LEN   64
+
 #define HTTP_CA_PATH_LEN    256
 #define HTTP_KEY_PATH_LEN   256
 #define HTTP_BODY_SIZE      2048
@@ -50,7 +51,12 @@ enum{
 #define HTTP_RET_LEN        16
 
 #define SM_SESS_LEN         128
+
+#define SM_NAME_LEN         64
+#define SM_EMAIL_LEN        64
 #define SM_UID_LEN          32
+#define SM_USERKEY_LEN      64
+
 #define SM_API_KEY_LEN      64
 #define SM_API_SEC_LEN      64
 
@@ -82,6 +88,14 @@ struct msg_service_info{
     char mqtt_pw[HTTP_PASSWORD_LEN];
 };
 
+struct sm_user_profile{
+    char    name[SM_NAME_LEN];
+    char    uid[SM_UID_LEN];
+    char    email[SM_EMAIL_LEN];
+    char    user_key[SM_USERKEY_LEN];
+};
+
+
 char *url_encode(char *str);
 char *url_decode(char *str);
 
@@ -94,7 +108,7 @@ char *sm_get_msg(char *sess, char *api_key, int serial);
 int sm_get_msg_info(int type, char *sess, struct msg_service_info *info);
 int sm_get_uid(char *cert_path, char *uid, char *sm_id);
 int sm_get_rly_info(int type, char *sess, struct rly_service_info *info);
-int sm_get_user_list(char *mac, char *api_key, char *api_sec, char ***result, int *user_num);
+int sm_get_user_list(char *token, char *api_key, void **result, int *user_num);
 int sm_add_user(char *token, char *user_id, char *dev_info, char *api_key, char *api_sec, char *req_key);
 int sm_rm_user(char *token, char *user_id, char *api_key, char *api_sec);
 int sm_status_handle(char *pid, int cid, int status);

@@ -17,6 +17,8 @@
 #include "mosquitto_internal.h"
 
 #include "bee.h"
+#include "bee_internal.h"
+
 #include "utils.h"
 #include "lssdp.h"
 #include "log.h"
@@ -207,7 +209,7 @@ int bee_log_to_file(int level, char *path)
 /* ===============================================
  * BEE user related function
  */
-int bee_add_user(char *user, char *dev_info, char *user_key)
+int bee_dev_add_user(char *user, char *dev_info, char *user_key)
 {
     int ret = 0;
     if(user_key){
@@ -221,10 +223,18 @@ int bee_add_user(char *user, char *dev_info, char *user_key)
         return BEE_API_FAIL;
 }
 
-int bee_del_user(char *user)
+int bee_dev_del_user(char *user)
 {
     //TODO
     return BEE_API_OK;
+}
+
+int bee_dev_get_user()
+{
+    void *users = NULL;
+    int user_num;
+    sm_get_user_list(bee.sm.session, bee.sm.api_key, &users, &user_num);
+    return 0;
 }
 
 struct bee_nbr *bee_get_nbr_list()
@@ -477,7 +487,8 @@ int bee_destroy()
     return BEE_API_OK;
 }
 
-char *bee_get_ssdp_st(){
+char *bee_get_ssdp_st()
+{
     if(strlen(bee.ssdp.ssdp_st) > 0)
         return bee.ssdp.ssdp_st;
     return BEE_SRV_TYPE;
