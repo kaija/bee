@@ -16,8 +16,9 @@ else
 VERSION=$(shell git log -1 --pretty="%H")
 endif
 
-CFLAGS= -fPIC -Wall -I./include -I../mosquitto/lib
+CFLAGS= -fPIC -Wall -I./include
 CFLAGS+= -DHAVE_OPENSSL
+CFLAGS+= -DWITH_THREADING
 CFLAGS+= -DBEE_VERSION="\"${VERSION}\""
 LDFLAGS=
 SHARED_LIB=lib/libbee.so

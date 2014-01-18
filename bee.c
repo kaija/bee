@@ -148,6 +148,7 @@ int bee_mqtt_start()
             goto err;
         }
     }
+    mosquitto_reconnect_delay_set(bee.mqtt.mosq, BEE_MQTT_DELAY, BEE_MQTT_DELAY_MAX, 1);
     mosquitto_connect_callback_set(bee.mqtt.mosq, bee_mqtt_connect_callback);
     mosquitto_message_callback_set(bee.mqtt.mosq, bee_mqtt_message_callback);
     mosquitto_subscribe_callback_set(bee.mqtt.mosq, bee_mqtt_subscribe_callback);

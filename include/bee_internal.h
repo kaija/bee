@@ -22,6 +22,9 @@
 
 #define BEE_PAUSE           2
 
+#define BEE_MQTT_DELAY      2
+#define BEE_MQTT_DELAY_MAX  30
+
 struct bee_client{
     int                 type;
     char                uid[SM_UID_LEN];
