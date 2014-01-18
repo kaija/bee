@@ -21,7 +21,7 @@ CFLAGS+= -DHAVE_OPENSSL
 CFLAGS+= -DWITH_THREADING
 CFLAGS+= -D__APPLE__
 CFLAGS+= -DBEE_VERSION="\"${VERSION}\""
-LDFLAGS=
+LDFLAGS= ../openssl/libssl.a ../openssl/libcrypto.a ../mosquitto/lib/libmosquitto.a
 SHARED_LIB=lib/libbee.so
 STATIC_LIB=lib/libbee.a
 
@@ -32,7 +32,7 @@ all: prepare shared static sample
 prepare:
 	mkdir -p lib
 shared: $(LIB_OBJS)
-	$(CC) -shared -o $(SHARED_LIB) $(LIB_OBJS) $(CFLAGS)
+	$(CC) -shared -o $(SHARED_LIB) $(LIB_OBJS) $(CFLAGS) $(LDFLAGS)
 static: $(LIB_OBJS)
 	$(AR) rcs $(STATIC_LIB) $(LIB_OBJS)
 
