@@ -2,7 +2,7 @@
 all: openssl mosquitto bee
 
 openssl:
-	cd openssl;./config
+	cd openssl;./Configure darwin64-x86_64-cc
 	$(MAKE) -C openssl
 
 mosquitto:

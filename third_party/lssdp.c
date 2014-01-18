@@ -319,7 +319,7 @@ void lssdp_get_self_ip(char *iface, char *ip)
     strcpy(ip, (char *)inet_ntoa(( (struct sockaddr_in *)&ifr.ifr_addr )->sin_addr));
     PLOG(PLOG_LEVEL_INFO,"%s: ip address:%s\n", iface, ip);
 }
-
+#ifndef __APPLE__
 void lssdp_get_self_mac(char *iface, char *mac)
 {
     int fd;
@@ -342,7 +342,7 @@ void lssdp_get_self_mac(char *iface, char *mac)
 
     if(SSDP_DEBUG) PLOG(PLOG_LEVEL_INFO,"%s: mac address:%s\n", iface, mac);
 }
-
+#endif
 int get_ssdp_field(const char *packet, ssize_t plen, lssdp_service_list_t *entry)
 {
     const char *linestart;
