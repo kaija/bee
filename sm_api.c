@@ -228,7 +228,7 @@ int sm_login(int login_type, char *username, char *password, char *ca_path, char
                             PLOG(PLOG_LEVEL_DEBUG, "Login error cannot get token\n");
                             ret = -1;
                         }else{
-                            if (body_get_field(hb->body, "uid", uid, HTTP_USERNAME_LEN) == -1) {
+                            if (body_get_field(hb->body, "uid", uid, SM_UID_LEN) == -1) {
                                 PLOG(PLOG_LEVEL_WARN, "Cannot get uid!\n");
                             }
                             sm_status_handle(username, 0, SM_LOGIN_SUCCESS);

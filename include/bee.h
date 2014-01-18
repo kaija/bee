@@ -35,11 +35,11 @@
 #define BEE_SRV_CLI             10
 #define BEE_SSDP_INTERVAL       10      // ssdp update interval
 
-#define BEE_LOCALHOST           "localhost"
+#define BEE_LOCALHOST           "127.0.0.1"
 #define BEE_CMD_LEN             32
 
 #define BEE_TOPIC_LEN           128
-#define BEE_KEEPALIVE           60
+#define BEE_KEEPALIVE           30
 
 #define BEE_TIMEOUT_S           0
 #define BEE_TIMEOUT_US          500*1000
@@ -73,18 +73,29 @@ enum{
     BEE_NOT_LOGIN,
     BEE_OOM
 };
+
 enum{
     BEE_CONN_REJECT,    //Message connection reject
     BEE_CONN_ACCEPT,     //Message connection accept
     BEE_CONN_REQUEST,
-    BEE_CONN_DISCONN
+    BEE_CONN_DISCONN_MANUAL,
+    BEE_CONN_DISCONN_TIMEOUT,
+    BEE_CONN_DISCONN_SERVER,
+    BEE_CONN_DISCONN_UNKNOWN
 };
+
 enum{
     BEE_API_OK,
     BEE_API_FAIL,
     BEE_API_TIMEOUT,
     BEE_API_NOT_LOGIN,
     BEE_API_PARAM_ERROR
+};
+
+enum{
+    BEE_USER_LOCAL,
+    BEE_USER_P2P,
+    BEE_USER_MSG
 };
 
 struct bee_nbr
@@ -127,28 +138,28 @@ void bee_set_uid(char *uid);
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_user_init_v2();
+int bee_user_init_v2(void *ctx);
 /**
  * @name    bee_user_init_v2
  * @brief   initial the library for user type use and no thread created
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_user_init();
+int bee_user_init(void *ctx);
 /**
  * @name    bee_dev_init
  * @brief   initial the library for device type use
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_dev_init();
+int bee_dev_init(void *ctx);
 /**
  * @name    bee_dev_init_v2
  * @brief   initial the library for device type use and no thread created
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_dev_init_v2();
+int bee_dev_init_v2(void *ctx);
 
 /**
  * @name    bee_user_login_id_pw
@@ -228,6 +239,22 @@ int bee_set_service(char *api_key, char *api_sec);
 int bee_logout();
 
 /**
+ * @name    bee_resume
+ * @brief   resume the library
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_resume();
+
+/**
+ * @name    bee_pause
+ * @brief   pause the library disable thread function
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_pause();
+
+/**
  * @name    bee_destroy
  * @brief   logout service and destroy all.
  * @retval  0       success
@@ -243,6 +270,17 @@ int bee_destroy();
  * @retval  <0      error with error code
  */
 int bee_connect(char *id);
+
+/**
+ * @name    bee_disconnect
+ * @brief   disconnect from remote side
+ * @param   id      the remote user/device id
+ * @param   fd      the local connect socket id
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_disconnect(char *id, int fd);
+
 /**
  * @name    bee_send_data
  * @brief   send data to remote user/device
@@ -319,7 +357,6 @@ int bee_discover_nbr();
  */
 int bee_delete_nbr_list();
 
-
 /**
  * @name    bee_reg_sm_cb
  * @brief   register service manager message callback
@@ -327,7 +364,8 @@ int bee_delete_nbr_list();
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_reg_sm_cb(int (*callback)(void *data, int len));
+int bee_reg_sm_cb(int (*callback)(void *ctx, void *data, int len));
+
 /**
  * @name    bee_reg_app_cb
  * @brief   register a user defined callback
@@ -336,7 +374,8 @@ int bee_reg_sm_cb(int (*callback)(void *data, int len));
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_reg_app_cb(void (*callback)(), int timeout);
+int bee_reg_app_cb(void (*callback)(void *ctx), int timeout);
+
 /**
  * @name    bee_reg_message_cb
  * @brief   register data message callback
@@ -344,7 +383,8 @@ int bee_reg_app_cb(void (*callback)(), int timeout);
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_reg_message_cb(int (*callback)(char *id, int cid, void *data, int len));
+int bee_reg_message_cb(int (*callback)(void *ctx, char *id, int cid, void *data, int len));
+
 /**
  * @name    bee_reg_status_cb
  * @brief   register library status change callback
@@ -352,7 +392,8 @@ int bee_reg_message_cb(int (*callback)(char *id, int cid, void *data, int len));
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_reg_status_cb(int (*status_cb)(int status));
+int bee_reg_status_cb(int (*status_cb)(void *ctx,int status));
+
 /**
  * @name    bee_reg_connection_cb
  * @brief   register data connection callback
@@ -360,7 +401,7 @@ int bee_reg_status_cb(int (*status_cb)(int status));
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_reg_connection_cb(int (*conn_cb)(char *remote, int cid, int status));
+int bee_reg_connection_cb(int (*conn_cb)(void *ctx, char *remote, int cid, int status));
 
 /**
  * @name    noly_hexdump
@@ -371,5 +412,29 @@ int bee_reg_connection_cb(int (*conn_cb)(char *remote, int cid, int status));
  * @retval  <0      error with error code
  */
 void noly_hexdump(unsigned char *start, int len);
+
+/*
+ * @name    bee_tlv_parser
+ * @brief   tlv parser
+ * @param   input   input tlv data
+ * @param   type    type return address
+ * @param   value   value return address
+ * @param   len     length return address
+ * @retval  >0 TLV offset
+ * @retval  <0 error
+ */
+int bee_tlv_parser(void *input, unsigned long *type, void **value, unsigned long *len);
+
+/*
+ * @name    bee_tlv_creator
+ * @brief   tlv creator
+ * @param   type    tlv type
+ * @param   len     tlv length
+ * @param   value   tlv value
+ * @param   output  output buffer address
+ * @retval  <0  error
+ * @retval  >0  output buffer length
+ */
+int bee_tlv_creator(unsigned long type, unsigned long len, void *value, void **output);
 
 #endif

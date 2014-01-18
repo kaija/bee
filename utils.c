@@ -14,6 +14,8 @@
 #include <sys/stat.h>
 
 #include "parson.h"
+#include "bee.h"
+#include "utils.h"
 
 
 static char encoding_table[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
@@ -133,16 +135,16 @@ int noly_udp_rand_socket(int *port)
     unsigned sin_len = sizeof(struct sockaddr_in);
     serv.sin_addr.s_addr = htonl(INADDR_ANY);
     serv.sin_port = htons(0);
-    serv.sin_family = PF_INET;
-    sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    serv.sin_family = AF_INET;
+    sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if(bind(sock, (struct sockaddr *) &serv, sin_len)<0){
-		fprintf(stderr, "bind socket port error\n");
+        fprintf(stderr, "bind socket port error\n");
     }
     if(getsockname(sock, (struct sockaddr *)&serv, &sin_len) < 0){
-		fprintf(stderr, "get socket name error\n");
+        fprintf(stderr, "get socket name error\n");
     }
     int sport = htons(serv.sin_port);
-	fprintf(stdout, "create udp random port %d\n", sport);
+    fprintf(stdout, "create udp random port %d\n", sport);
     *port = sport;
     return sock;
 }
@@ -155,15 +157,15 @@ int noly_udp_socket(int port)
     unsigned sin_len = sizeof(struct sockaddr_in);
     serv.sin_addr.s_addr = htonl(INADDR_ANY);
     serv.sin_port = htons(port);
-    serv.sin_family = PF_INET;
-    sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    serv.sin_family = AF_INET;
+    sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if(bind(sock, (struct sockaddr *) &serv, sin_len)<0){
-		fprintf(stderr, "bind socket port error\n");
+        fprintf(stderr, "bind socket port error\n");
     }
     if(getsockname(sock, (struct sockaddr *)&serv, &sin_len) < 0){
-		fprintf(stderr, "get socket name error\n");
+        fprintf(stderr, "get socket name eerror\n");
     }
-	fprintf(stdout, "create udp random port %d\n", port);
+    fprintf(stdout, "create udp random port %d\n", port);
     return sock;
 }
 
@@ -171,11 +173,11 @@ int noly_udp_sender(char *addr, int port, char *payload, int len)
 {
     int sock;
     struct sockaddr_in serv_addr;
-    sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if(sock < 0) { return -1; }
     if(payload == NULL) { return -1; }
     bzero(&serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = PF_INET;
+    serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = inet_addr(addr);
     serv_addr.sin_port = htons(port);
     ssize_t n = sendto(sock, payload, len, 0, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
@@ -211,6 +213,31 @@ int noly_tcp_socket(int port, int max_cli)
     return sock;
 }
 
+int noly_udp_socket_from(int start, int *port)
+{
+    int i = start;
+    int sk = INVALID_SOCKET;
+    for(i = start ; i < 65535 ; i++){
+        if((sk = noly_udp_socket(i)) > 0 ){
+            *port = i;
+            return sk;
+        }
+    }
+    return INVALID_SOCKET;
+}
+
+int noly_tcp_socket_from(int start, int *port, int max_cli)
+{
+    int i = start;
+    int sk = INVALID_SOCKET;
+    for(i = start ; i < 65535 ; i++){
+        if((sk = noly_tcp_socket(i, max_cli)) > 0 ){
+            *port = i;
+            return sk;
+        }
+    }
+    return INVALID_SOCKET;
+}
 
 int json_obj_get_obj(JSON_Object *obj, char *key, char *val, int len)
 {
@@ -265,4 +292,55 @@ void test()
     char tmp[] = "{\"serial\":450024072,\"src\":\"700000165\",\"type\":5,\"version\":\"1.0\"}";
     json_str_get_obj(tmp, "serial", val, 128);
     printf("result : %s\n", val);
+}
+/*
+ * @name    bee_tlv_parser
+ * @brief   tlv parser
+ * @param   input   input tlv data
+ * @param   type    type return address
+ * @param   value   value return address
+ * @param   len     length return address
+ * @retval  >0 TLV offset
+ * @retval  =0 TLV end
+ * @retval  <0 error
+ */
+int bee_tlv_parser(void *input, unsigned long *type, void **value, unsigned long *len)
+{
+    unsigned long data_len = 0;
+    unsigned char *start = input;
+    if(!start || !type ||!value || !len) return -1;
+    *type = (start[0]<<8) + start[1];
+    data_len = (start[2]<<24) + (start[3]<<16) + (start[4]<<8) + start[5];
+    *value = start + BEE_TLV_OFFSET;
+    *len = data_len;
+    return BEE_TLV_OFFSET + data_len;
+}
+
+/*
+ * @name    bee_tlv_creator
+ * @brief   tlv creator
+ * @param   type    tlv type
+ * @param   len     tlv length
+ * @param   value   tlv value
+ * @param   output  output buffer address
+ * @retval  <0  error
+ * @retval  >0  output buffer length
+ */
+int bee_tlv_creator(unsigned long type, unsigned long len, void *value, void **output)
+{
+    if(!value || !output) return -1;
+    *output = malloc(len + BEE_TLV_OFFSET);
+    unsigned char *ptr = *output;
+    if(*output){
+        ptr[0] = type>>8;
+        ptr[1] = type & 0xff;
+        ptr[2] = (len >> 24)& 0xff;
+        ptr[3] = (len >> 16)& 0xff;
+        ptr[4] = (len >> 8)& 0xff;
+        ptr[5] = len & 0xff;
+        ptr = *output + BEE_TLV_OFFSET;
+        memcpy(ptr, value, len);
+        return BEE_TLV_OFFSET + len;
+    }
+    return -1;
 }

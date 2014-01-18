@@ -22,7 +22,7 @@ int conn_cb(void *ctx, char *remote, int cid, int status)
         return BEE_CONN_ACCEPT;
         //return BEE_CONN_REJECT; //reject if you like
     }
-    if(status == BEE_CONN_DISCONN_MANUAL || status == BEE_CONN_DISCONN_SERVER || status == BEE_CONN_DISCONN_TIMEOUT){
+    if(status == BEE_CONN_DISCONN_MANUAL || status == BEE_CONN_DISCONN_TIMEOUT || status == BEE_CONN_DISCONN_SERVER){
         if(cid > 0){
             fprintf(stdout, "********** Local connection %d disconnected\n", cid);
         }
@@ -51,19 +51,19 @@ int cmd_callback(void *ctx, char *id, int cid, void *data, int len)
     return 0;
 }
 
-void app_callback()
+void app_callback(void *ctx)
 {
     printf("Timeout\n");
 }
 int service()
 {
-    bee_dev_init_v2(NULL);
+    bee_user_init_v2(NULL);
     bee_set_service("HA-45058956", "0744424235");
     bee_reg_status_cb(status_cb);
     bee_reg_connection_cb(conn_cb);
     bee_reg_message_cb(cmd_callback);
 
-    if(bee_dev_login_id_pw("f835dd000020", "gemtek2014") == BEE_API_OK){
+    if(bee_user_login_id_pw("kaija.chang@gmail.com", "mamamiya") == BEE_API_OK){
         fprintf(stdout, "*********** Login Cloud service manager\n");
     }
     bee_reg_app_cb(app_callback, 3);

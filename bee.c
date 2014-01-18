@@ -1,8 +1,8 @@
 /**
- * @file	bee.c
- * @brief 	bee real time message library
- * @author 	Kevin Chang kevin_chang@gemteks.com
- * @date	2014/01/03
+ * @file    bee.c
+ * @brief   bee real time message library
+ * @author  Kevin Chang kevin_chang@gemteks.com
+ * @date    2014/01/03
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,16 +27,18 @@
 static struct bee_struct bee = {
     .run = BEE_FALSE,
     .mqtt.mosq = NULL,
-    .mqtt.sock = -1,
+    .mqtt.sock = INVALID_SOCKET,
     .mqtt.security = 1,
-    .local.sock = 0,
+    .local.sock = INVALID_SOCKET,
     .sm_msg_cb = NULL,
     .msg_cb = NULL,
     .app_cb = NULL,
     .app_timeout = 0,
+    .event_sock = INVALID_SOCKET,
+    .ssdp.sock = INVALID_SOCKET,
 };
 void *bee_main(void *data);
-int bee_init(int type);
+int bee_init(void *ctx, int type);
 int bee_login(int type);
 int bee_mqtt_start();
 int bee_ssdp_update();
@@ -44,8 +46,17 @@ int bee_message_handler(char *src, char *data);
 int bee_sm_message_handler(char *tlv, unsigned long tlv_len);
 int bee_status_change_handler(int status);
 int bee_conn_message_handler(char *src, char *data, int len);
+int bee_event_handler(int sock);
 int bee_send_conn_req(char *id);
-int bee_init_without_thread(int type);
+int bee_send_disconect(char *id, int type);
+int bee_init_without_thread(void *ctx, int type);
+void *bee_cli_seek(char *id, int fd);
+int bee_local_connect(char *ip, int port);
+int bee_client_add(char *id, int fd);
+int bee_client_del(char *id, int fd);
+struct bee_client *bee_client_get(char *id, int fd);
+int bee_cli_id_seeker(const void *e, const void *id);
+int bee_cli_fd_seeker(const void *e, const void *id);
 /* ===============================================
  *     Mosquitto callback area
  */
@@ -258,39 +269,45 @@ int bee_delete_nbr_list()
 /* ===============================================
  * BEE library main function
  */
+
+void bee_dump_service()
+{
+    PLOG(PLOG_LEVEL_INFO, "API KEY:%s\nAPI SECRET:%s\n", bee.sm.api_key, bee.sm.api_sec);
+}
 int bee_set_service(char *api_key, char *api_sec)
 {
     if(!api_key || !api_sec) return BEE_API_PARAM_ERROR;
+    PLOG(PLOG_LEVEL_INFO, "API KEY:%s\nAPI SECRET:%s\n", api_key, api_sec);
     strncpy(bee.sm.api_key, api_key, SM_API_KEY_LEN - 1);
     strncpy(bee.sm.api_sec, api_sec, SM_API_SEC_LEN - 1);
     return BEE_API_OK;
 }
 
-int bee_user_init()
+int bee_user_init(void *ctx)
 {
-    bee_init(SM_TYPE_USER);
+    bee_init(ctx, SM_TYPE_USER);
     return BEE_API_OK;
 }
 
-int bee_user_init_v2()
+int bee_user_init_v2(void *ctx)
 {
-    bee_init_without_thread(SM_TYPE_USER);
+    bee_init_without_thread(ctx, SM_TYPE_USER);
     return BEE_API_OK;
 }
 
-int bee_dev_init()
+int bee_dev_init(void *ctx)
 {
-    bee_init(SM_TYPE_DEVICE);
+    bee_init(ctx, SM_TYPE_DEVICE);
     return BEE_API_OK;
 }
 
-int bee_dev_init_v2()
+int bee_dev_init_v2(void *ctx)
 {
-    bee_init_without_thread(SM_TYPE_DEVICE);
+    bee_init_without_thread(ctx, SM_TYPE_DEVICE);
     return BEE_API_OK;
 }
 
-int bee_default_conn_cb(char *remote, int cid, int status)
+int bee_default_conn_cb(void *ctx, char *remote, int cid, int status)
 {
     if(remote){
         PLOG(PLOG_LEVEL_INFO, "Accept remote %s connection by default\n", remote);
@@ -298,9 +315,9 @@ int bee_default_conn_cb(char *remote, int cid, int status)
     return BEE_CONN_ACCEPT;
 }
 
-int bee_init_without_thread(int type)
+int bee_init_without_thread(void *ctx, int type)
 {
-
+    bee.mode = BEE_MODE_NOTHREAD;
     list_init(&bee.local.client);
     plogger_set_path("/tmp/p2p.log");
     plogger_enable_file(PLOG_LEVEL_INFO);
@@ -317,7 +334,7 @@ int bee_init_without_thread(int type)
     if(pthread_mutex_init(&bee.api_lock, NULL) != 0){
         PLOG(PLOG_LEVEL_ERROR, "API lock init error\n");
     }
-    if(bee.ssdp.sock == 0){
+    if(bee.ssdp.sock == INVALID_SOCKET){
         lssdp_get_iface(NULL);
         bee.ssdp.sock = lssdp_create_socket();
         if(bee.ssdp.sock < 0) {
@@ -325,14 +342,14 @@ int bee_init_without_thread(int type)
             return BEE_API_FAIL;
         }
     }
-    if(bee.local.sock == 0){
-        bee.local.sock = noly_tcp_socket(BEE_SRV_PORT, BEE_SRV_CLI);
+    if(bee.local.sock == INVALID_SOCKET){
+        bee.local.sock = noly_tcp_socket_from(BEE_SRV_PORT, &bee.local.port,BEE_SRV_CLI);
         if(bee.local.sock < 0){
             bee.error = BEE_SOCKET_ERROR;
             PLOG(PLOG_LEVEL_ERROR,"Local socket create failure (%d)%s\n", errno, strerror(errno));
             return BEE_API_FAIL;
         }
-        PLOG(PLOG_LEVEL_INFO, "Local Service Socket created %d\n", BEE_SRV_PORT);
+        PLOG(PLOG_LEVEL_INFO, "Local Service Socket created %d\n", bee.local.port);
     }
     return BEE_API_OK;
 }
@@ -342,12 +359,13 @@ int bee_loop_forever()
     bee_main((void *) &bee);
     return BEE_API_OK;
 }
-int bee_init(int type)
+int bee_init(void *ctx, int type)
 {
+    bee.mode = BEE_MODE_THREAD;
     list_init(&bee.local.client);
     plogger_set_path("/tmp/p2p.log");
     plogger_enable_file(PLOG_LEVEL_INFO);
-    plogger_enable_screen(PLOG_LEVEL_INFO);
+    plogger_enable_screen(PLOG_LEVEL_DEBUG);
     bee.type = type;
     bee.mqtt.will = BEE_FALSE;
     bee.mqtt.qos = 1;
@@ -360,7 +378,7 @@ int bee_init(int type)
     if(pthread_mutex_init(&bee.api_lock, NULL) != 0){
         PLOG(PLOG_LEVEL_ERROR, "API lock init error\n");
     }
-    if(bee.ssdp.sock == 0){
+    if(bee.ssdp.sock == INVALID_SOCKET){
         lssdp_get_iface(NULL);
         bee.ssdp.sock = lssdp_create_socket();
         if(bee.ssdp.sock < 0) {
@@ -368,14 +386,14 @@ int bee_init(int type)
             return BEE_API_FAIL;
         }
     }
-    if(bee.local.sock == 0){
-        bee.local.sock = noly_tcp_socket(BEE_SRV_PORT, BEE_SRV_CLI);
+    if(bee.local.sock == INVALID_SOCKET){
+        bee.local.sock = noly_tcp_socket_from(BEE_SRV_PORT, &bee.local.port,BEE_SRV_CLI);
         if(bee.local.sock < 0){
             bee.error = BEE_SOCKET_ERROR;
             PLOG(PLOG_LEVEL_ERROR,"Local socket create failure (%d)%s\n", errno, strerror(errno));
             return BEE_API_FAIL;
         }
-        PLOG(PLOG_LEVEL_INFO, "Local Service Socket created %d\n", BEE_SRV_PORT);
+        PLOG(PLOG_LEVEL_INFO, "Local Service Socket created %d\n", bee.local.port);
     }
     //first time run a thread
     if(bee.run == BEE_FALSE){
@@ -395,6 +413,7 @@ int bee_user_login_id_pw(char *id, char *pw)
     strncpy(bee.sm.password, pw, HTTP_PASSWORD_LEN);
     bee_login(SM_TYPE_USER);
     bee.type = SM_TYPE_USER;
+    //FIXME add login failure handler
     return BEE_API_OK;
 }
 
@@ -406,6 +425,7 @@ int bee_user_login_cert(char *cert_path, char *pkey_path, char *pw)
     strncpy(bee.sm.pkeypass, pw, HTTP_PASSWORD_LEN);
     bee_login(SM_TYPE_USER);
     bee.type = SM_TYPE_USER;
+    //FIXME add login failure handler
     return BEE_API_OK;
 }
 int bee_dev_login_id_pw(char *id, char *pw)
@@ -415,6 +435,7 @@ int bee_dev_login_id_pw(char *id, char *pw)
     strncpy(bee.sm.password, pw, HTTP_PASSWORD_LEN);
     bee_login(SM_TYPE_DEVICE);
     bee.type = SM_TYPE_DEVICE;
+    //FIXME add login failure handler
     return BEE_API_OK;
 }
 
@@ -426,6 +447,7 @@ int bee_dev_login_cert(char *cert_path, char *pkey_path, char *pw)
     strncpy(bee.sm.pkeypass, pw, HTTP_PASSWORD_LEN);
     bee_login(SM_TYPE_DEVICE);
     bee.type = SM_TYPE_DEVICE;
+    //FIXME add login failure handler
     return BEE_API_OK;
 }
 
@@ -461,6 +483,7 @@ int bee_login(int type){
     }
     bee.status = BEE_GET_INFO;
     if(bee_get_msg_info() != BEE_API_OK){
+        //FIXME add status update func
         bee.status = BEE_LOGIN;
     }
     return BEE_API_OK;
@@ -479,11 +502,58 @@ int bee_logout()
     return BEE_API_OK;
 }
 
+int bee_pause()
+{
+    bee.run = BEE_PAUSE;
+    int len = noly_udp_sender(BEE_LOCALHOST, bee.event_port, BEE_LIB_PAUSE, strlen(BEE_LIB_PAUSE));
+    if(len == strlen(BEE_LIB_PAUSE)){
+        return BEE_API_OK;
+    }
+    return BEE_API_FAIL;
+}
+
+int bee_resume()
+{
+    if(bee.run == BEE_FALSE || bee.run == BEE_PAUSE){
+        bee.run = BEE_TRUE;
+        if(bee.mode == BEE_MODE_THREAD){
+            if(pthread_create(&bee.bee_thread, NULL, bee_main, (void *)&bee) != 0){
+                PLOG(PLOG_LEVEL_FATAL, "Main thread create failure\n");
+                return BEE_API_FAIL;
+            }
+        }else{
+            bee_main((void *)&bee);
+        }
+        PLOG(PLOG_LEVEL_INFO, "Main thread started.\n");
+    }
+    return BEE_API_OK;
+}
 int bee_destroy()
 {
     PLOG(PLOG_LEVEL_INFO, "Destroy\n");
     bee.run = BEE_FALSE;
-    noly_udp_sender(BEE_LOCALHOST, bee.event_port, "disconn", strlen("disconn"));
+    noly_udp_sender(BEE_LOCALHOST, bee.event_port, BEE_LIB_DESTROY, strlen(BEE_LIB_DESTROY));
+    //FIXME change to pause library thread then clean all data
+    PLOG(PLOG_LEVEL_DEBUG, "Library thread end\n");
+    if(bee.event_sock > 0) {
+        close(bee.event_sock);
+        bee.event_sock = INVALID_SOCKET;
+    }
+    if(bee.local.sock > 0) {
+        close(bee.local.sock);
+        bee.local.sock = INVALID_SOCKET;
+    }
+    if(bee.ssdp.sock > 0) {
+        close(bee.ssdp.sock);
+        bee.ssdp.sock = INVALID_SOCKET;
+    }
+    if(bee.mqtt.mosq) {
+        mosquitto_disconnect(bee.mqtt.mosq);
+        mosquitto_lib_cleanup();
+        mosquitto_destroy(bee.mqtt.mosq);
+        bee.mqtt.mosq = NULL;
+        bee.mqtt.security = 1;
+    }
     return BEE_API_OK;
 }
 
@@ -493,14 +563,74 @@ char *bee_get_ssdp_st()
         return bee.ssdp.ssdp_st;
     return BEE_SRV_TYPE;
 }
+
+int bee_local_get_ip(lssdp_service_list_t *list, char *remote_id, char *ip, int *port)
+{
+    if(!list || !remote_id || !ip) return -1;
+    lssdp_service_list_t *tmp;
+    tmp = list;
+    while(tmp != NULL){
+        char *pch = NULL;
+        char location[SSDP_LOCATION_LEN] = {0};
+        if((!strcmp(remote_id, tmp->usn) || !strcmp(remote_id, tmp->sm_id)) && tmp->location){
+            strncpy(location, tmp->location, SSDP_LOCATION_LEN);
+            pch = strtok(location, ":");
+            if(!pch) return -1;
+            strncpy(ip, pch, SSDP_IP_LEN);
+            pch = strtok(NULL, ":");
+            if(!pch) return -1;
+            *port = atoi(pch);
+printf("match %s %s:%d\n", tmp->usn, ip, *port);
+            return 0;
+        }
+        tmp=tmp->next;
+    }
+    return -1;
+}
+
 int bee_connect(char *id)
 {
+    PLOG(PLOG_LEVEL_DEBUG, "Connect to %s\n", id);
     int ret = BEE_API_OK;
     //FIXME add local tcp socket handle
+    char ip[SSDP_LOCATION_LEN];
+    int port;
     lssdp_service_list_t *local_list;
     local_list = lssdp_list_service(bee_get_ssdp_st());
-    ret = bee_send_conn_req(id);
+    if(bee_local_get_ip(local_list, id, ip, &port) == 0){
+        PLOG(PLOG_LEVEL_DEBUG, "Remote client is in local %s:%d\n", ip, port);
+        int sock = bee_local_connect(ip, port);
+        if(sock == INVALID_SOCKET){
+            return -1;
+        }else{
+            bee_client_add(id, sock);
+        }
+    }else{
+        ret = bee_send_conn_req(id);
+    }
     return ret;
+}
+
+int bee_disconnect(char *id, int fd)
+{
+    struct bee_client *client = bee_client_get(id, fd);
+    if(client){
+        if(fd > 0 || client->type == BEE_USER_LOCAL){
+            bee_client_del(id, fd);
+            if(client->fd > 0){
+                close(client->fd);
+                PLOG(PLOG_LEVEL_DEBUG, "Disconnect from local client %d\n", fd);
+            }
+            return BEE_API_OK;
+        }else if(id){
+            PLOG(PLOG_LEVEL_DEBUG, "Disconnect from remote client %d\n", fd);
+            bee_client_del(id, fd);
+            return bee_send_disconect(id, BEE_CONN_DISCONN_MANUAL);
+        }
+    }else{
+        PLOG(PLOG_LEVEL_ERROR,"Disconnect error\n");
+    }
+    return BEE_API_FAIL;
 }
 
 int bee_send_message(char *id, void *data, unsigned long len, int type)
@@ -618,6 +748,47 @@ int bee_send_conn_resp(char *id, int resp)
         memcpy(&tlv[8] , data, len);
         //noly_hexdump(tlv, 8 + len );
         bee.error = bee_send_message(id, tlv, len + 8, SM_MSG_TYPE_RT);
+        //FIXME add error handle
+        free(tlv);
+    }
+    return BEE_API_OK;
+}
+int bee_send_disconect(char *id, int type)
+{
+    char data[128];
+    int len = 0;
+    switch(type)
+    {
+        case BEE_CONN_DISCONN_MANUAL:
+            len = snprintf(data, 128, "{\"cmd\":\"disconnect\",\"reason\":\"%s\"}", "user manual");
+            break;
+        case BEE_CONN_DISCONN_TIMEOUT:
+            len = snprintf(data, 128, "{\"cmd\":\"disconnect\",\"reason\":\"%s\"}", "timeout");
+            break;
+        case BEE_CONN_DISCONN_SERVER:
+            len = snprintf(data, 128, "{\"cmd\":\"disconnect\",\"reason\":\"%s\"}", "server force");
+            break;
+        case BEE_CONN_DISCONN_UNKNOWN:
+            len = snprintf(data, 128, "{\"cmd\":\"disconnect\",\"reason\":\"%s\"}", "unknown");
+            break;
+        default:
+            return -1;
+            break;
+    }
+    unsigned char *tlv = malloc(len + 8);
+    if(tlv){
+        tlv[0] = 0x00;
+        tlv[1] = 0x05;
+        tlv[2] = 0x00;
+        tlv[3] = 0x00;
+        tlv[4] = (int) ((len>>24) & 0xff);
+        tlv[5] = (int) ((len>>16) & 0xff);
+        tlv[6] = (int) ((len>>8) & 0xff);
+        tlv[7] = (int) ((len) & 0xff);
+        memcpy(&tlv[8] , data, len);
+        //noly_hexdump(tlv, 8 + len );
+        bee.error = bee_send_message(id, tlv, len + 8, SM_MSG_TYPE_RT);
+        //FIXME add error handle
         free(tlv);
     }
     return BEE_API_OK;
@@ -627,32 +798,45 @@ int bee_message_handler(char *src, char *data)
     if(!src || !data) return BEE_API_PARAM_ERROR;
     PLOG(PLOG_LEVEL_DEBUG,"%s\n%s\n", src, data);
     size_t tlv_len;
-    char *tlv = base64_decode(data, strlen(data), &tlv_len);
+    unsigned char *tlv = (unsigned char *)base64_decode(data, strlen(data), &tlv_len);
     if(tlv){
         unsigned long len = (tlv[4] << 24) + (tlv[5] << 16) + (tlv[6] << 8) + tlv[7];
         if(len != tlv_len - 8) {
-            PLOG(PLOG_LEVEL_WARN, "TLV data length not match!!!\n");
+            PLOG(PLOG_LEVEL_WARN, "TLV data length not match!!! len = %ld tlv_len = %ld\n", len , tlv_len);
         }
         PLOG(PLOG_LEVEL_DEBUG, "Get TLV data length:%d\n", len);
         //noly_hexdump((unsigned char *)tlv, 16);
-        if(tlv[1] == 0x01){//Data
-            memmove(&tlv[0], &tlv[8], len);
-            tlv[len] = '\0';
-            if(bee.msg_cb){
-                bee.msg_cb(src, -1, tlv, len);
-            }
-            //noly_hexdump((unsigned char *)tlv, 8);
-        }else if(tlv[1] == 0x00){//SM
-            memmove(&tlv[0], &tlv[8], len);
-            tlv[len] = '\0';
-            bee_sm_message_handler(tlv, len);
-            //noly_hexdump((unsigned char *)tlv, 16);
-        }else if(tlv[1] == 0x05){//Message type connection
-            bee_conn_message_handler(src, &tlv[8], len);
-        }else{//P2P connection use
-            PLOG(PLOG_LEVEL_INFO,"Bee library not support P2P mode reply something\n");
-            //char reply[] = "{\"cmd\":\"conn_reject\",\"reason\":\"not support\"}";
-            //bee_send_p2p(src, reply, strlen(reply));
+        char type = tlv[1];
+        switch(type)
+        {
+            case 0x00:
+                PLOG(PLOG_LEVEL_INFO,"\n");
+                noly_hexdump((unsigned char *)tlv, 8);
+                break;
+            case 0x01:
+                PLOG(PLOG_LEVEL_INFO,"\n");
+                memmove(&tlv[0], &tlv[8], len);
+                tlv[len] = '\0';
+                if(bee.msg_cb){
+                    bee.msg_cb(bee.ctx, src, -1, tlv, len);
+                }
+                noly_hexdump((unsigned char *)tlv, 8);
+                break;
+            case 0x02:
+            case 0x03:
+            case 0x04:
+                PLOG(PLOG_LEVEL_INFO,"\n");
+                //char reply[] = "{\"cmd\":\"conn_reject\",\"reason\":\"not support\"}";
+                //bee_send_p2p(src, reply, strlen(reply));
+                noly_hexdump((unsigned char *)tlv, 8);
+                break;
+            case 0x05:
+                PLOG(PLOG_LEVEL_INFO,"\n");
+                bee_conn_message_handler(src, (char *)&tlv[8], len);
+                break;
+            default:
+                PLOG(PLOG_LEVEL_INFO,"Bee library not support P2P mode reply something\n");
+                break;
         }
         free(tlv);
     }
@@ -665,17 +849,22 @@ int bee_conn_message_handler(char *src, char *data, int len)
     char cmd[BEE_CMD_LEN];
     if(json_str_get_obj(data, "cmd", cmd, BEE_CMD_LEN) == 0){
         if(strncmp(cmd, "conn_req",strlen("conn_req"))==0){
-            if(bee.conn_cb(src, -1, BEE_CONN_REQUEST) == BEE_CONN_ACCEPT){
+            if(bee.conn_cb(bee.ctx, src, -1, BEE_CONN_REQUEST) == BEE_CONN_ACCEPT){
                 bee_send_conn_resp(src, BEE_CONN_ACCEPT);
             }else{
                 bee_send_conn_resp(src, BEE_CONN_REJECT);
             }
+        }else if(strncmp(cmd, "disconnect",strlen("disconnect"))==0){
+            PLOG(PLOG_LEVEL_INFO, "Remote disconnect %s\n", src);
+            bee_client_del(src, -1);
+            //FIXME add status callback
         }else if(strncmp(cmd, "conn_resp",strlen("conn_resp"))==0){
             if(json_str_get_obj(data, "result", cmd, BEE_CMD_LEN) == 0){
                 if(strncmp(cmd, "accept",strlen("accept"))==0){
-                    bee.conn_cb(src, -1, BEE_CONN_ACCEPT);
+                    bee.conn_cb(bee.ctx, src, -1, BEE_CONN_ACCEPT);
+                    bee_client_add(src, -1);
                 }else{
-                    bee.conn_cb(src, -1, BEE_CONN_REJECT);
+                    bee.conn_cb(bee.ctx, src, -1, BEE_CONN_REJECT);
                 }
             }
         }
@@ -695,7 +884,7 @@ int bee_reg_app_cb(void (*callback)(), int timeout)
     return BEE_API_OK;
 }
 
-int bee_reg_sm_cb(int (*callback)(void *data, int len))
+int bee_reg_sm_cb(int (*callback)(void *ctx, void *data, int len))
 {
     if(!callback) return BEE_API_PARAM_ERROR;
     bee.sm_msg_cb = callback;
@@ -708,13 +897,13 @@ int bee_sm_message_handler(char *tlv, unsigned long tlv_len)
     tlv[tlv_len] = '\0';
     PLOG(PLOG_LEVEL_INFO, "Recv Service Manager Command: %s\n", tlv);
     if(bee.sm_msg_cb){
-        return bee.sm_msg_cb(tlv,tlv_len);
+        return bee.sm_msg_cb(bee.ctx, tlv,tlv_len);
     }else{
         PLOG(PLOG_LEVEL_INFO, "Service Manager command callback not registered\n");
     }
     return 0;
 }
-int bee_reg_message_cb(int (*callback)(char *id, int cid, void *data, int len))
+int bee_reg_message_cb(int (*callback)(void *ctx, char *id, int cid, void *data, int len))
 {
     bee.msg_cb = callback;
     return BEE_API_OK;
@@ -738,19 +927,67 @@ void bee_check()
     }
 }
 
-int bee_local_cli_add(int fd)
+
+int bee_client_add(char *id, int fd)
 {
     struct bee_client *client = malloc(sizeof(struct bee_client));
     if(client){
         client->fd = fd;
-        client->local = BEE_TRUE;
+        if(id){
+            strncpy(client->uid, id, SM_UID_LEN);
+        }
+        if(fd > 0){
+            client->type = BEE_USER_LOCAL;
+        }else{
+            client->type = BEE_USER_MSG;
+        }
         list_append(&bee.local.client, client);
         return 0;
     }
     PLOG(PLOG_LEVEL_ERROR, "Out of memory\n");
     return -1;
 }
-int bee_local_cli_seeker(const void *e, const void *id)
+
+int bee_client_del(char *id, int fd)
+{
+    if(fd > 0){
+        int sock = fd;
+        list_attributes_seeker(&bee.local.client, bee_cli_fd_seeker);
+        void *cli = list_seek(&bee.local.client, &sock);
+        if(cli){
+            list_delete(&bee.local.client, cli);
+        }
+    }
+    if(id){
+        list_attributes_seeker(&bee.local.client, bee_cli_id_seeker);
+        void *cli = list_seek(&bee.local.client, id);
+        if(cli){
+            list_delete(&bee.local.client, cli);
+        }
+    }
+    return 0;
+}
+
+struct bee_client *bee_client_get(char *id, int fd)
+{
+    if(fd > 0){
+        return bee_cli_seek(NULL,fd);
+    }
+    if(id){
+        return bee_cli_seek(id, -1);
+    }
+    return NULL;
+}
+
+int bee_cli_id_seeker(const void *e, const void *id)
+{
+    const struct bee_client *client = (struct bee_client *)e;
+    if(strncmp(client->uid, (char *)id, SM_UID_LEN) == 0){
+        return 1;
+    }
+    return 0;
+}
+int bee_cli_fd_seeker(const void *e, const void *id)
 {
     const struct bee_client *client = (struct bee_client *)e;
     if(client->fd == *(int *)id ){
@@ -758,16 +995,35 @@ int bee_local_cli_seeker(const void *e, const void *id)
     }
     return 0;
 }
-int bee_local_cli_del(int fd)
+
+void *bee_cli_seek(char *id, int fd)
 {
-    int sock = fd;
-    PLOG(PLOG_LEVEL_INFO,"delete client fd %d\n", fd);
-    list_attributes_seeker(&bee.local.client, bee_local_cli_seeker);
-    void *cli = list_seek(&bee.local.client, &sock);
-    if(cli){
-        list_delete(&bee.local.client, cli);
+    if(fd > 0){
+        int sock = fd;
+        list_attributes_seeker(&bee.local.client, bee_cli_fd_seeker);
+        return list_seek(&bee.local.client, &sock);
     }
-    return 0;
+    if(id){
+        list_attributes_seeker(&bee.local.client, bee_cli_id_seeker);
+        return list_seek(&bee.local.client, id);
+    }
+    return NULL;
+}
+
+int bee_local_connect(char *ip, int port)
+{
+    if(!ip || port < 0 || port > 65535) return -1;
+    int sk;
+    struct sockaddr_in dest;
+    sk = socket(AF_INET, SOCK_STREAM, 0);
+    bzero(&dest, sizeof(dest));
+    dest.sin_family = AF_INET;
+    dest.sin_port = htons(port);
+    dest.sin_addr.s_addr = inet_addr(ip);
+
+    int ret = connect(sk , (struct sockaddr *)&dest, sizeof(dest));
+    if(ret == 0) return sk;
+    return INVALID_SOCKET;
 }
 
 int bee_local_safe_read(int fd, unsigned long timeout)//timeout in ms
@@ -784,6 +1040,7 @@ int bee_local_safe_read(int fd, unsigned long timeout)//timeout in ms
         FD_SET(fd, &fs);
         ret = select(fd+1, &fs, NULL, NULL, &tv );
         if(ret == 0){
+            PLOG(PLOG_LEVEL_DEBUG, "read timeout\n");
             break;//Timeout break
         }else if(ret > 0){
             memset(buf, 0, BEE_PKT_SIZE);
@@ -797,8 +1054,14 @@ int bee_local_safe_read(int fd, unsigned long timeout)//timeout in ms
                 }
                 total += len;
             }else{
+                if(data) free(data);
+                total = -1;
                 //FIXME Error handle. Remote disconnect
+                break;
             }
+        }else{
+            total = -1;
+            break;
         }
     }
     if(total) printf("%s\n", buf);
@@ -813,12 +1076,15 @@ int bee_local_cli_handle(fd_set *fs)
     for(i=0;i<size;i++){
         struct bee_client *client = list_get_at(&bee.local.client, i);
         if(client && FD_ISSET(client->fd, fs)){
+            PLOG(PLOG_LEVEL_DEBUG,"FD %d set\n", client->fd);
             int len = bee_local_safe_read(client->fd, BEE_LOCAL_TIMEO);
             if(len > 0){
             }else{
                 int fd = client->fd;
-                bee_local_cli_del(fd);
+                PLOG(PLOG_LEVEL_DEBUG,"Remote disconnect %d\n", fd);
+                bee_client_del(NULL, fd);
                 close(fd);
+                //FIXME add status callback
             }
         }
     }
@@ -845,10 +1111,11 @@ int bee_local_serv_handle(int sock)
     socklen_t cli_len;
     int fd = accept(sock, (struct sockaddr *)&cli, &cli_len);
     if(fd > 0){
+        //TODO add call callback to user
         PLOG(PLOG_LEVEL_INFO,"accept new client fd %d\n", fd);
         noly_socket_set_nonblock(fd);
-        bee_local_cli_add(fd);
-        bee_local_safe_read(fd, BEE_LOCAL_TIMEO);
+        return bee_client_add(NULL, fd);
+        //bee_local_safe_read(fd, BEE_LOCAL_TIMEO);
         //FIXME Add status callback
     }else{
         PLOG(PLOG_LEVEL_ERROR,"accept connection error (%d)%s\n", errno, strerror(errno));
@@ -856,12 +1123,12 @@ int bee_local_serv_handle(int sock)
     return 0;
 }
 
-int bee_reg_status_cb(int (*status_cb)(int status))
+int bee_reg_status_cb(int (*status_cb)(void *ctx, int status))
 {
     bee.status_cb = status_cb;
     return 0;
 }
-int bee_reg_connection_cb(int (*conn_cb)(char *remote, int cid, int status))
+int bee_reg_connection_cb(int (*conn_cb)(void *ctx, char *remote, int cid, int status))
 {
     bee.conn_cb = conn_cb;
     return 0;
@@ -872,7 +1139,7 @@ int bee_status_change_handler(int status)
         bee.status = BEE_CONNECTED;
     }
     if(bee.status_cb){
-        bee.status_cb(status);
+        bee.status_cb(bee.ctx, status);
     }
     return 0;
 }
@@ -884,11 +1151,11 @@ int bee_network_update()
 int bee_ssdp_update()
 {
     if(strlen(bee.ssdp.ssdp_st) > 0){
-        lssdp_set_service(bee.ssdp.ssdp_st, bee.sm.username, bee.sm.uid, BEE_SRV_PORT, "P2P");
+        lssdp_set_service(bee.ssdp.ssdp_st, bee.sm.username, bee.sm.uid, bee.local.port, "P2P");
         lssdp_delete_list(bee.ssdp.ssdp_st);
         lssdp_request_service(bee.ssdp.ssdp_st);
     }else{
-        lssdp_set_service(BEE_SRV_TYPE, bee.sm.username, bee.sm.uid, BEE_SRV_PORT, "P2P");
+        lssdp_set_service(BEE_SRV_TYPE, bee.sm.username, bee.sm.uid, bee.local.port, "P2P");
         lssdp_delete_list(BEE_SRV_TYPE);
         lssdp_request_service(BEE_SRV_TYPE);
     }
@@ -924,13 +1191,14 @@ void *bee_main(void *data)
     fd_set rfs,wfs;
     int max = 0;
     int event_port;
-    int event_sock = noly_udp_rand_socket(&event_port);
-    if(event_sock < 0){
-        PLOG(PLOG_LEVEL_ERROR, "local notify socket create failure\n");
+    if(bee.event_sock < 0){
+        bee.event_sock = noly_udp_rand_socket(&event_port);
+        bee.event_port = event_port;
+        PLOG(PLOG_LEVEL_INFO, "Local event socket %d port %d\n", bee.event_sock,event_port);
     }
-    bee.event_port = event_port;
-    bee.event_sock = event_sock;
-    PLOG(PLOG_LEVEL_INFO, "Local event socket port %d\n", event_port);
+    if(bee.event_sock < 0){
+        PLOG(PLOG_LEVEL_ERROR, "local notify socket create failure!\n");
+    }
     while(bee.run)
     {
         tv.tv_sec = BEE_TIMEOUT_S;
@@ -960,7 +1228,7 @@ void *bee_main(void *data)
         if(bee.app_cb && bee.app_timeout > 0){//for user register callback
             now = time(NULL);
             if(app_next_timeout != 0 && now >= app_next_timeout){
-                bee.app_cb();
+                bee.app_cb(bee.ctx);
                 app_next_timeout = now + bee.app_timeout;
             }else if(app_next_timeout == 0){
                 app_next_timeout = now + bee.app_timeout;
@@ -970,7 +1238,6 @@ void *bee_main(void *data)
         int ret = select(max+1, &rfs, &wfs, NULL, &tv);
         if(ret == 0){
             now = time(NULL);
-            PLOG(PLOG_LEVEL_DEBUG, "Periodically check\n");
             bee_check();
             if (bee_mqtt_handler(&rfs, &wfs) != MOSQ_ERR_SUCCESS){
                 mosquitto_reconnect(bee.mqtt.mosq);
@@ -983,17 +1250,17 @@ void *bee_main(void *data)
             PLOG(PLOG_LEVEL_ERROR, "socket select error %d (%s)\n", ret , strerror(errno));
             if(bee.local.sock > 0 && FD_ISSET(bee.local.sock, &rfs)){
                 close(bee.local.sock);
-                bee.local.sock = 0;
+                bee.local.sock = INVALID_SOCKET;
                 PLOG(PLOG_LEVEL_ERROR, "local socket error\n");
             }
             if(bee.mqtt.sock > 0 && FD_ISSET(bee.mqtt.sock, &rfs)){
                 close(bee.mqtt.sock);
-                bee.mqtt.sock = 0;
+                bee.mqtt.sock = INVALID_SOCKET;
                 PLOG(PLOG_LEVEL_ERROR, "MQTT socket error\n");
             }
             if(bee.event_sock > 0 && FD_ISSET(bee.event_sock, &rfs)){
                 close(bee.event_sock);
-                bee.event_sock = 0;
+                bee.event_sock = INVALID_SOCKET;
                 PLOG(PLOG_LEVEL_ERROR, "event socket error\n");
             }
             bee_local_cli_handle(&rfs);
@@ -1001,9 +1268,16 @@ void *bee_main(void *data)
         }else{
             if(bee.event_sock > 0 && FD_ISSET(bee.event_sock, &rfs)){
                 PLOG(PLOG_LEVEL_DEBUG, "event socket select\n");
+                int res = bee_event_handler(bee.event_sock);
+                if(res == 0){
+                    if(bee.mode == BEE_MODE_THREAD){
+                        pthread_detach(pthread_self());
+                    }
+                    return NULL;//leave without clean
+                }
             }
             if(bee.ssdp.sock > 0 && FD_ISSET(bee.ssdp.sock, &rfs)){
-                PLOG(PLOG_LEVEL_DEBUG, "SSDP socket select\n");
+                //PLOG(PLOG_LEVEL_DEBUG, "SSDP socket select\n");
                 bee_ssdp_handler(bee.ssdp.sock);
             }
             bee_mqtt_handler(&rfs, &wfs);
@@ -1015,24 +1289,24 @@ void *bee_main(void *data)
             //TODO check socket one by one
         }
     }
-    PLOG(PLOG_LEVEL_DEBUG, "Library thread end\n");
-    if(bee.event_sock > 0) {
-        close(bee.event_sock);
-        bee.event_sock = 0;
-    }
-    if(bee.local.sock > 0) {
-        close(bee.local.sock);
-        bee.local.sock = 0;
-    }
-    if(bee.ssdp.sock > 0) {
-        close(bee.ssdp.sock);
-        bee.ssdp.sock = 0;
-    }
-    if(bee.mqtt.mosq) {
-        mosquitto_disconnect(bee.mqtt.mosq);
-        mosquitto_lib_cleanup();
-        mosquitto_destroy(bee.mqtt.mosq);
-    }
     PLOG(PLOG_LEVEL_INFO, "Library thread stopped\n");
     return NULL;
+}
+
+int bee_event_handler(int sock)
+{
+    char cmd[BEE_PKT_SIZE];
+    memset(cmd, 0, BEE_PKT_SIZE);
+    if(sock > 0){
+        int len = read(sock, cmd, BEE_PKT_SIZE);
+        if(len > 0){
+            PLOG(PLOG_LEVEL_DEBUG, "Event command %s\n", cmd);
+            if(strcmp(cmd, BEE_LIB_PAUSE) == 0){
+                return 0;
+            }else if(strcmp(cmd, BEE_LIB_DESTROY) == 0){
+                return 0;
+            }
+        }
+    }
+    return 0;
 }

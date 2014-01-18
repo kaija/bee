@@ -12,9 +12,21 @@
 #include "sm_api.h"
 #include "simclist.h"
 
+#define BEE_LIB_PAUSE       "pause"
+#define BEE_LIB_RESUME      "resume"
+#define BEE_LIB_RECONNECT   "resume"
+#define BEE_LIB_DESTROY     "destroy"
+
+#define BEE_MODE_THREAD     1
+#define BEE_MODE_NOTHREAD   0
+
+#define BEE_PAUSE           2
+
 struct bee_client{
-    int local;
-    int fd;
+    int                 type;
+    char                uid[SM_UID_LEN];
+    int                 fd;
+    //Add some struct here
 };
 
 struct sm_account {
@@ -58,7 +70,9 @@ struct local_serv {
 };
 
 struct bee_struct {
+    void                *ctx;
     char                version[BEE_VER_LEN];
+    int                 mode;
     pthread_t           bee_thread;
     pthread_mutex_t     api_lock;
     struct sm_account   sm;
@@ -71,11 +85,11 @@ struct bee_struct {
     int                 error;  //error code
     int                 event_port;
     int                 event_sock;
-    int                 (*msg_cb)(char *,int,  void *, int);
-    int                 (*sm_msg_cb)(void *, int);
-    int                 (*status_cb)(int status);
-    int                 (*conn_cb)(char *remote, int cid, int status);
-    void                (*app_cb)();
+    int                 (*msg_cb)(void *, char *,int,  void *, int);
+    int                 (*sm_msg_cb)(void *, void *, int);
+    int                 (*status_cb)(void *, int status);
+    int                 (*conn_cb)(void *, char *remote, int cid, int status);
+    void                (*app_cb)(void *);
     int                 app_timeout;
 };
 #endif
