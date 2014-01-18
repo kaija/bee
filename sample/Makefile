@@ -1,5 +1,5 @@
 CFLAGS= -I../include -Wall
-LDFLAGS= ../lib/libbee.a ../../mosquitto-1.2.3/lib/libmosquitto.a -lssl -lpthread -lrt
+LDFLAGS= ../lib/libbee.a ../../mosquitto/lib/libmosquitto.a -lssl -lpthread -lrt
 
 .PHONY: all dev_connect user_connect test_api nothread user_nothread user_local android switch
 all: dev_connect user_connect test_api sensor nothread user_nothread user_local android switch
