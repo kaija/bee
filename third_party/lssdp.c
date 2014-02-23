@@ -319,13 +319,15 @@ void lssdp_get_self_ip(char *iface, char *ip)
     strcpy(ip, (char *)inet_ntoa(( (struct sockaddr_in *)&ifr.ifr_addr )->sin_addr));
     PLOG(PLOG_LEVEL_INFO,"%s: ip address:%s\n", iface, ip);
 }
-#ifndef __APPLE__
+
 void lssdp_get_self_mac(char *iface, char *mac)
 {
     int fd;
     struct ifreq ifr;
     memset(mac, '\0', SSDP_MAC_LEN);
 
+    // FIXME: rewrite iOS version using https://github.com/njh/marquette/blob/master/getMacAddress.m
+#ifndef __IOS__
     fd = socket(AF_INET, SOCK_DGRAM, 0);
     ifr.ifr_addr.sa_family = AF_INET;
     strncpy(ifr.ifr_name, iface, IFNAMSIZ-1);
@@ -339,10 +341,11 @@ void lssdp_get_self_mac(char *iface, char *mac)
          (unsigned char)ifr.ifr_hwaddr.sa_data[3],
          (unsigned char)ifr.ifr_hwaddr.sa_data[4],
          (unsigned char)ifr.ifr_hwaddr.sa_data[5]);
+#endif
 
     if(SSDP_DEBUG) PLOG(PLOG_LEVEL_INFO,"%s: mac address:%s\n", iface, mac);
 }
-#endif
+
 int get_ssdp_field(const char *packet, ssize_t plen, lssdp_service_list_t *entry)
 {
     const char *linestart;
@@ -430,7 +433,7 @@ int process_ssdp_service_search(int sock, const struct sockaddr *addr, char *my_
             }
         }
     }else{
-        PLOG(PLOG_LEVEL_DEBUG,"not match my service\n");
+        PLOG(PLOG_LEVEL_DEBUG,"not match my service my_service %s id %s st %s\n", my_service, id, st);
         return -1;
     }
     return 0;

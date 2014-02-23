@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "bee.h"
+#include "parson.h"
 
 static int switch_status = 0;
 
@@ -12,7 +13,7 @@ int set_switch_status(void *ctx, int status)
     char cmd[128];
     memset(cmd, 0, 128);
     sprintf(cmd, "led %s 7&", switch_status?"on":"off");
-    system(cmd);
+    //system(cmd);
     return 0;
 }
 
@@ -22,7 +23,7 @@ void toggle_switch()
     char cmd[128];
     memset(cmd, 0, 128);
     sprintf(cmd, "led %s 7&", switch_status?"on":"off");
-    system(cmd);
+    //system(cmd);
 }
 
 int status_cb(void *ctx, int status)
@@ -73,6 +74,7 @@ int cmd_callback(void *ctx, char *id, int cid, void *data, int len)
     bee_hexdump(data, len);
     fprintf(stdout, "===============================\n");
     fprintf(stdout, "%s\n", (char *)data);
+    fprintf(stdout, "Total %d bytes\n", len);
     return 0;
 }
 
@@ -81,12 +83,18 @@ int service()
     bee_dev_init(NULL);
     bee_set_service("HA-45058956", "0744424235");
     bee_reg_status_cb(status_cb);
-    bee_reg_connection_cb(conn_cb);
+    bee_reg_receiver_cb(conn_cb);
     bee_reg_message_cb(cmd_callback);
-
+//#ifdef OFFLINE
+#if 0
+    bee_set_user_info("f835dd000022","gemtek2014", "600000751");
+    bee_ssdp_update();
+#else
+    bee_set_user_info("f835dd000022","gemtek2014", "600000751");
     if(bee_dev_login_id_pw("f835dd000022", "gemtek2014") == BEE_API_OK){
         fprintf(stdout, "*********** Login Cloud service manager\n");
     }
+#endif
     while(1){
         sleep(5);
         toggle_switch();
@@ -96,6 +104,8 @@ int service()
 
 int main()
 {
+    printf("BEE library version : %s\n", bee_get_version());
+    //return 0;
     unsigned char tmp[8];
     tmp[0] = 0x01;
     tmp[1] = 0xff;
@@ -115,6 +125,6 @@ int main()
     }
     printf("type: %ld length:%ld value\n", type , data_len);
     noly_hexdump(data, data_len);
-    //service();
+    service();
     return 0;
 }

@@ -17,7 +17,8 @@ int b()
     bee_reg_status_cb(status_cb);
     
     if(bee_dev_login_id_pw("f835dd000003", "gemtek") == BEE_API_OK){
-        bee_dev_get_user();
+        struct bee_user_list list;
+        bee_dev_get_user(&list);
     }
     while(1){
         sleep(1);

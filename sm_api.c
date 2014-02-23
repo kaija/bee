@@ -9,6 +9,7 @@
 #include "http.h"
 #include "log.h"
 #include "parson.h"
+#include "utils.h"
 
 int sm_ret_code_handler(char *username, char *ret_code);
 
@@ -190,6 +191,12 @@ int sm_api_init(){
     return 0;
 }
 
+void sm_dump_log(char *api, char *str)
+{
+    if(!api || !str) return;
+    PLOG(PLOG_LEVEL_ERROR, "SM API %s error:\n%s\n", api, str);
+}
+
 int sm_login(int login_type, char *username, char *password, char *ca_path, char *key_path, char *sess, char* uid) {
     char url[HTTP_URL_LEN];
     char ret_code[HTTP_RET_LEN] = {0};
@@ -218,7 +225,7 @@ int sm_login(int login_type, char *username, char *password, char *ca_path, char
             if(strstr(hb->body, "Unauthorized") != NULL){
                 PLOG(PLOG_LEVEL_DEBUG, "Your id and password not correct\n");
                 sm_status_handle(username, 0, SM_AUTH_FAILURE);
-                ret = -1;
+                ret = SM_AUTH_FAILURE;
             }else{
                 if(body_get_field(hb->body, "code", ret_code, HTTP_RET_LEN)!=-1){
                     int code = atoi(ret_code);
@@ -226,7 +233,7 @@ int sm_login(int login_type, char *username, char *password, char *ca_path, char
                         if(body_get_field(hb->body, "token", sess, SM_SESS_LEN)==-1){
                             sm_status_handle(username, 0, SM_LOGIN_FAILURE);
                             PLOG(PLOG_LEVEL_DEBUG, "Login error cannot get token\n");
-                            ret = -1;
+                            ret = SM_BAD_RESP;
                         }else{
                             if (body_get_field(hb->body, "uid", uid, SM_UID_LEN) == -1) {
                                 PLOG(PLOG_LEVEL_WARN, "Cannot get uid!\n");
@@ -236,12 +243,14 @@ int sm_login(int login_type, char *username, char *password, char *ca_path, char
                         }
                     }else{
                         sm_ret_code_handler(username, ret_code);
-                        ret = -1;
+                        sm_dump_log(url, hb->body);
+                        ret = SM_BAD_RESP;
                     }
                 }else{
                     PLOG(PLOG_LEVEL_DEBUG, "login failure: can not get return code\n");
                     sm_status_handle(username, 0, SM_LOGIN_FAILURE);
-                    ret = -1;
+                    sm_dump_log(url, hb->body);
+                    ret = SM_BAD_RESP;
                 }
             }
         }
@@ -249,26 +258,32 @@ int sm_login(int login_type, char *username, char *password, char *ca_path, char
     }else{
         PLOG(PLOG_LEVEL_DEBUG, "login failure: connection failure\n");
         sm_status_handle(username, 0, SM_LOGIN_FAILURE);   // TODO: return status 'HUZZA_SM_CONNECTION_FAILURE'
-        ret = -1;
+        sm_dump_log(url, "connect to server error\n");
+        ret = SM_CONN_ERROR;
     }
     return ret;
 }
 
 int sm_send_msg(char *sess ,char *dst, char *api_key, char *msg, int type) {
+    int ret = 0;
+    int code = 0;
     char url[HTTP_URL_LEN];
     char ret_code[HTTP_RET_LEN];
+    //FIXME
     if(!sess || !dst || !msg) return -1;
     int body_len = 0;
     struct http_body *hb;
-    char body[HTTP_BODY_SIZE];
-    memset(body, 0, HTTP_BODY_SIZE);
+    char *body = NULL;
+    body = malloc(strlen(msg) + HTTP_BODY_SIZE);
+    //FIXME
+    if(!body) return -1;
     char *session = url_encode(sess);
     char *dest = url_encode(dst);
     if(session && dest) {
         if(type == SM_MSG_TYPE_RT){
-            body_len = snprintf(body, HTTP_BODY_SIZE, "token=%s&dst=%s&text=%s&qos=1&expire=8640000&type=1&api_key=%s", session, dest, msg, api_key);
+            body_len = snprintf(body, strlen(msg) + HTTP_BODY_SIZE, "token=%s&dst=%s&text=%s&qos=1&expire=8640000&type=1&api_key=%s", session, dest, msg, api_key);
         }else{
-            body_len = snprintf(body, HTTP_BODY_SIZE, "token=%s&dst=%s&text=%s&qos=1&expire=8640000&type=0&api_key=%s", session, dest, msg, api_key);
+            body_len = snprintf(body, strlen(msg) + HTTP_BODY_SIZE, "token=%s&dst=%s&text=%s&qos=1&expire=8640000&type=0&api_key=%s", session, dest, msg, api_key);
         }
         if(session) free(session);
         if(dest) free(dest);
@@ -280,22 +295,37 @@ int sm_send_msg(char *sess ,char *dst, char *api_key, char *msg, int type) {
     if(hb) {
         PLOG(PLOG_LEVEL_DEBUG, "body\n%s\n", hb->body);
         if(hb->body){
-            if(body_get_field(hb->body, "code", ret_code, HTTP_RET_LEN)!=-1){
-                sm_ret_code_handler("unknow", ret_code);
+            if(body_get_field(hb->body, "code", ret_code, HTTP_RET_LEN) != -1){
+                code = sm_ret_code_handler("unknow", ret_code);
+                if(code == 2221){
+                    ret = 0;
+                }else if(code == 1431){
+                    ret = SM_SESS_TIMEOUT;
+                }else{
+                    ret = SM_SEND_FAILURE;
+                }
             }else{
                 PLOG(PLOG_LEVEL_DEBUG, "sm send failure: can not get return code\n");
                 sm_status_handle("unknow", 0, SM_SEND_FAILURE);
+                sm_dump_log(url, hb->body);
+                ret = SM_BAD_RESP;
             }
         }
         free_hb(hb);
+    }else{
+        sm_dump_log(url, "connect to server error\n");
+        ret = SM_CONN_ERROR;
     }
-    return 0;
+    free(body);
+    return ret;
 }
 
-char *sm_get_msg(char *sess, char *api_key, int serial) {
+int sm_get_msg(char *sess, char *api_key, int serial, char **msg) {
+    int ret = 0;
+    int code = 0;
     char url[HTTP_URL_LEN];
     char ret_code[HTTP_RET_LEN];
-    if(!sess) return  NULL;
+    if(!sess) return SM_PARAM_ERROR;
     char *res = NULL;
     struct http_body *hb;
     int body_len = 0;
@@ -312,20 +342,29 @@ char *sm_get_msg(char *sess, char *api_key, int serial) {
         if(hb->body){
             PLOG(PLOG_LEVEL_DEBUG, "head %s\nbody\n%s\n", body, hb->body);
             if(body_get_field(hb->body, "code", ret_code, HTTP_RET_LEN)!=-1){
-                res = malloc(hb->len+1);
-                if(res){
+                code = sm_ret_code_handler(sm_setup.username, ret_code);
+                if(code == 2222 && (res = malloc(hb->len + 1)) != NULL){
                     memcpy(res, hb->body, hb->len);
+                    *msg = res;
                     res[hb->len] = 0;
+                }else if(code == 1431){
+                    ret = SM_SESS_TIMEOUT;
+                }else{
+                    ret = SM_BAD_RESP;
                 }
-                sm_ret_code_handler(sm_setup.username, ret_code);
             }else{
                 PLOG(PLOG_LEVEL_DEBUG, "sm send failure: can not get return code\n");
                 sm_status_handle(sm_setup.username, 0, SM_SEND_FAILURE);
+                sm_dump_log(url, hb->body);
+                ret = SM_BAD_RESP;
             }
         }
         free_hb(hb);
+    }else{
+        sm_dump_log(url, "connect to server error\n");
+        ret = SM_CONN_ERROR;
     }
-    return res;
+    return ret;
 }
 
 int sm_get_msg_info(int type, char *sess, struct msg_service_info *info) {
@@ -368,6 +407,7 @@ int sm_get_msg_info(int type, char *sess, struct msg_service_info *info) {
             goto err;
         }
 err:
+        //TODO add dump HTTP body to error log
         free_hb(hb);
         res = 0;
     }
@@ -405,9 +445,10 @@ int sm_ret_code_handler(char *username, char *ret_code)
         default:
             break;
     }
-    return 0;
+    return code;
 }
 int sm_dev_login(int login_type, char *username, char *password, char *ca_path, char *key_path, char *sess, char *uid) {
+    int code;
     char url[HTTP_URL_LEN];
     char ret_code[HTTP_RET_LEN] = {0};
     int ret = 0;
@@ -435,15 +476,15 @@ int sm_dev_login(int login_type, char *username, char *password, char *ca_path, 
             if(strstr(hb->body, "Unauthorized") != NULL){
                 PLOG(PLOG_LEVEL_DEBUG, "Your id and password not correct\n");
                 sm_status_handle(username, 0, SM_AUTH_FAILURE);
-                ret = -1;
+                ret = SM_AUTH_FAILURE;
             }else{
                 if(body_get_field(hb->body, "code", ret_code, HTTP_RET_LEN)!=-1){
-                    int code = atoi(ret_code);
+                    code = atoi(ret_code);
                     if((code == 1221) || (code == 1211)){
                         if(body_get_field(hb->body, "token", sess, SM_SESS_LEN)==-1){
                             sm_status_handle(username, 0, SM_LOGIN_FAILURE);
                             PLOG(PLOG_LEVEL_DEBUG, "Login error cannot get token\n");
-                            ret = -1;
+                            ret = SM_BAD_RESP;
                         }else{
                             if (body_get_field(hb->body, "gid", uid, SM_UID_LEN) == -1) {
                                 PLOG(PLOG_LEVEL_WARN, "Cannot get uid!\n");
@@ -452,13 +493,13 @@ int sm_dev_login(int login_type, char *username, char *password, char *ca_path, 
                             PLOG(PLOG_LEVEL_INFO, "Login success token:'%s'\n", sess);
                         }
                     }else{
-                        sm_ret_code_handler(username, ret_code);
-                        ret = -1;
+                        code = sm_ret_code_handler(username, ret_code);
+                        ret = SM_BAD_RESP;
                     }
                 }else{
                     PLOG(PLOG_LEVEL_DEBUG, "login failure: can not get return code\n");
                     sm_status_handle(username, 0, SM_LOGIN_FAILURE);
-                    ret = -1;
+                    ret = SM_BAD_RESP;
                 }
             }
         }
@@ -466,7 +507,7 @@ int sm_dev_login(int login_type, char *username, char *password, char *ca_path, 
     }else{
         PLOG(PLOG_LEVEL_DEBUG, "login failure: connection failure\n");
         sm_status_handle(username, 0, SM_LOGIN_FAILURE);   // TODO: return status 'HUZZA_SM_CONNECTION_FAILURE'
-        ret = -1;
+        ret = SM_CONN_ERROR;
     }
     return ret;
 }
@@ -576,7 +617,7 @@ char *SM_SHA1(char *api_secret, time_t now){
     printf("SHA1 %s\n", sm_sha1);
     return sm_sha1;
 }
-int sm_get_user_list(char *token, char *api_key, void **result, int *user_num) {
+int sm_get_user_list(char *token, char *api_key, struct sm_user_profile **result, int *user_num) {
     char url[HTTP_URL_LEN];
     if(!api_key || !token) return -1;
     int res = -1;
@@ -588,7 +629,7 @@ int sm_get_user_list(char *token, char *api_key, void **result, int *user_num) {
     snprintf(url, HTTP_URL_LEN, "%s/v1/device/get_user_list",SM_API_SERVER);
     hb = http_post(url, body, body_len, HTTP_POST);
     if(hb) {
-        //printf("body\n%s\n",hb->body);
+        PLOG(PLOG_LEVEL_DEBUG, "body\n%s\n",hb->body);
         JSON_Value *js_value = NULL;
         JSON_Object *js_object, *js_sub_object;
         JSON_Array *js_array;
@@ -601,16 +642,19 @@ int sm_get_user_list(char *token, char *api_key, void **result, int *user_num) {
             *user_num = array_size;
             if(js_array != NULL){
                 *result = malloc(sizeof(struct sm_user_profile) * array_size);
-                sprintf(*result, "123456\n");
                 memset(*result, 0, sizeof(struct sm_user_profile) * array_size);
-                struct sm_user_profile *users = *result;
                 for(i = 0; i < array_size; i++){
                     js_sub_object = json_array_get_object(js_array, i);
                     const char *uid = json_object_get_string(js_sub_object, "uid");
                     const char *user_key = json_object_get_string(js_sub_object, "key");
-                    strcpy(users->uid, uid);
-                    if(user_key) strcpy(users->user_key, user_key);
-                    users++;
+                    const char *email = json_object_get_string(js_sub_object, "email");
+                    const char *username = json_object_get_string(js_sub_object, "username");
+                    const char *mobile = json_object_get_string(js_sub_object, "mobile");
+                    if(uid) strncpy((*result)[i].uid, uid, SM_UID_LEN);
+                    if(user_key) strncpy((*result)[i].user_key, user_key, SM_USERKEY_LEN);
+                    if(email) strncpy((*result)[i].email, email, SM_EMAIL_LEN);
+                    if(username) strncpy((*result)[i].name, username, SM_NAME_LEN);
+                    if(mobile) strncpy((*result)[i].mobile, mobile, SM_MOBILE_LEN);
                 }
                 res = 0;
             }
@@ -640,10 +684,12 @@ int sm_add_user(char *token, char *user_id, char *dev_info, char *api_key, char 
             int code = atoi(ret_code);
             if(code == 1231){
                 PLOG(PLOG_LEVEL_INFO, "User and device binding successful\n");
+                res = 0;
             }else{
                 PLOG(PLOG_LEVEL_DEBUG, "User and device binding fail, ret: %d\n", code);
             }
         }
+        free_hb(hb);
     }
     return res;
 }
@@ -667,13 +713,76 @@ int sm_rm_user(char *token, char *user_id, char *api_key, char *api_sec)
             int code = atoi(ret_code);
             if(code == 1234){
                 PLOG(PLOG_LEVEL_INFO, "User and device unbinding successful\n");
+                res = 0;
             }else{
                 PLOG(PLOG_LEVEL_DEBUG, "User and device unbinding fail, ret: %d\n", code);
             }
         }
+        free_hb(hb);
     }
     return res;
 }
+
+int sm_new_device(char *cert, char *pkey, char *pw, char *mac, char *pin, struct sm_dev_account *result)
+{
+    char url[HTTP_URL_LEN];
+    if(!cert || !mac || !result) return -1;
+    strncpy(sm_setup.ca_path, cert, HTTP_CA_PATH_LEN);
+    if(pkey) strncpy(sm_setup.key_path, pkey, HTTP_CA_PATH_LEN);
+    if(pw) strncpy(sm_setup.password, pw, HTTP_PASSWORD_LEN);
+    int res = -1;
+    struct http_body *hb;
+    int body_len = 0;
+    char body[HTTP_BODY_SIZE];
+    memset(body, 0, HTTP_BODY_SIZE);
+    body_len = snprintf(body, HTTP_BODY_SIZE, "mac=%s&pin=%s", mac, pin);
+    snprintf(url, HTTP_URL_LEN, "%s/v1/device/registration", SM_API_SECURE_SERVER);
+    hb = http_post(url, body, body_len, HTTP_POST);
+    if(hb) {
+        char code_buf[HTTP_RET_LEN] = {0};
+        noly_json_str_get_str(hb->body, "code", code_buf, HTTP_RET_LEN);
+        int code = atoi(code_buf);
+        if(code == 1222){
+            noly_json_str_get_str(hb->body, "gid", result->uid, SM_UID_LEN);
+            noly_json_str_get_str(hb->body, "mac", result->username, SM_NAME_LEN);
+            noly_json_str_get_str(hb->body, "pwd", result->password, SM_PW_LEN);
+            noly_json_str_get_str(hb->body, "pin", result->pin, SM_PIN_LEN);
+            noly_json_str_get_str(hb->body, "cert", result->cert, SM_CERT_LEN);
+            noly_json_str_get_str(hb->body, "pkey", result->pkey, SM_CERT_LEN);
+            res = 0;
+        }
+        free_hb(hb);
+    }
+    return res;
+}
+
+int sm_device_activation(char *dev_id)
+{
+    char url[HTTP_URL_LEN];
+    if(!dev_id) return -1;
+    int res = -1;
+    struct http_body *hb;
+    int body_len = 0;
+    char body[HTTP_BODY_SIZE];
+    memset(body, 0, HTTP_BODY_SIZE);
+    body_len = snprintf(body, HTTP_BODY_SIZE, "device_id=%s", dev_id);
+    snprintf(url, HTTP_URL_LEN, "%s/v1/device/activation", SM_API_SECURE_SERVER);
+    hb = http_post(url, body, body_len, HTTP_POST);
+    if(hb) {
+        char code_buf[HTTP_RET_LEN] = {0};
+        noly_json_str_get_str(hb->body, "code", code_buf, HTTP_RET_LEN);
+        int code = atoi(code_buf);
+        if(code == 1226){
+            PLOG(PLOG_LEVEL_INFO, "device activat successful\n");
+            res = 0;
+        }else{
+            PLOG(PLOG_LEVEL_INFO, "device activat failure\n");
+        }
+        free_hb(hb);
+    }
+    return res;
+}
+
 int sm_status_handle(char *pid, int cid, int status)
 {
     return 0;

@@ -18,7 +18,8 @@ int b()
     bee_set_service("HA-45058956", "0744424235");
     bee_reg_status_cb(status_cb);
     if(bee_user_login_id_pw("kaija.chang.co@gmail.com", "mamamiya") == BEE_API_OK){
-        bee_dev_get_user();
+        struct bee_user_list list;
+        bee_dev_get_user(&list);
     }
     while(1){
         sleep(5);

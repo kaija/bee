@@ -1,13 +1,15 @@
 /**
- * @file	bee_internal.h
- * @brief 	bee real time message library
- * @author 	Kevin Chang kevin_chang@gemteks.com
- * @date	2014/01/03
+ * @file    bee.h
+ * @brief   bee real time message library
+ * @author  Kevin Chang kevin_chang@gemteks.com
+ * @date    2014/01/03
  */
 
 #ifndef __BEE_H
 #define __BEE_H
+
 #include <pthread.h>
+
 #include "bee.h"
 #include "sm_api.h"
 #include "simclist.h"
@@ -44,15 +46,19 @@
 #define BEE_TIMEOUT_S           0
 #define BEE_TIMEOUT_US          500*1000
 
-#define BEE_LOCAL_TIMEO         100
-#define BEE_PKT_SIZE            1500
+#define BEE_LOCAL_TIMEO         1000
+#define BEE_PKT_SIZE            1400
 
 #define BEE_MSG_SIZE            16*1024
 
 #define bee_hexdump             noly_hexdump
 
-#define BEE_DATA_TYPE_RELIABLE    SM_MSG_TYPE_DEFAULT
-#define BEE_DATA_TYPE_REALTIME    SM_MSG_TYPE_RT
+#define BEE_GUEST_UID           "000000000"
+
+// Map to Service manager message type
+
+#define BEE_DATA_TYPE_RELIABLE    0
+#define BEE_DATA_TYPE_REALTIME    1
 
 /*! library status enum */
 enum{
@@ -68,10 +74,16 @@ enum{
 };
 
 enum{
-    BEE_SOCKET_ERROR,
-    BEE_SSDP_ERROR,
-    BEE_NOT_LOGIN,
-    BEE_OOM
+    BEE_ERR_SOCKET=101,             //socket create or use error
+    BEE_ERR_OOM=102,                //out of memory
+    BEE_ERR_SSDP=301,               //ssdp error
+    BEE_ERR_ID_PW=401,              //ID / PW invalid
+    BEE_ERR_TOKEN_EXPIRE=402,       //access token expire
+    BEE_ERR_NOT_LOGIN=403,          //still not login   4xx for REST API
+    BEE_ERR_TIMEOUT=404,            //API access timeout
+    BEE_ERR_BAD_RESP=405,           //bad API response
+    BEE_ERR_NO_ID=406,              //no such user
+    BEE_ERR_CONNECT=407             //server connection failure
 };
 
 enum{
@@ -81,6 +93,7 @@ enum{
     BEE_CONN_DISCONN_MANUAL,
     BEE_CONN_DISCONN_TIMEOUT,
     BEE_CONN_DISCONN_SERVER,
+    BEE_CONN_DISCONN_CLIENT,
     BEE_CONN_DISCONN_UNKNOWN
 };
 
@@ -89,13 +102,22 @@ enum{
     BEE_API_FAIL,
     BEE_API_TIMEOUT,
     BEE_API_NOT_LOGIN,
-    BEE_API_PARAM_ERROR
+    BEE_API_PARAM_ERROR,
+    BEE_API_TOKEN_EXPIRE
 };
 
 enum{
     BEE_USER_LOCAL,
     BEE_USER_P2P,
     BEE_USER_MSG
+};
+
+struct bee_version {
+    // type.proto.build   x.y.z
+    char                version[BEE_VER_LEN];
+    int                 p2p;
+    int                 msg;
+    int                 sm;
 };
 
 struct bee_nbr
@@ -108,8 +130,8 @@ struct bee_nbr
 };
 
 struct bee_user_list{
-    char                **user_list;
-    int                 user_num;
+    struct sm_user_profile    *user_list;
+    int                       user_num;
 };
 
 /**
@@ -118,6 +140,26 @@ struct bee_user_list{
  * @return  version string
  */
 char *bee_get_version();
+
+/**
+ * @name    bee_set_user_info
+ * @brief   set user info username, password and uid
+ * @param   id      the username
+ * @param   pw      the password
+ * @param   uid     the uid buffer
+ * @retval  <0      error with error code
+ */
+int bee_set_user_info(char *id, char *pw, char *uid);
+
+/**
+ * @name    bee_guest_mode
+ * @brief   set guest mode
+ * @param   id      the username
+ * @param   uid     the uid generate from app
+ * @retval  <0      error with error code
+ */
+int bee_guest_mode(char *id, char *uid);
+
 /**
  * @name    bee_get_uid
  * @brief   get account uid
@@ -263,6 +305,14 @@ int bee_pause();
 int bee_destroy();
 
 /**
+ * @name    bee_offline
+ * @brief   go to offline mode
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_offline();
+
+/**
  * @name    bee_connect
  * @brief   connect to remote user/device
  * @param   id      the remote user/device id
@@ -314,7 +364,7 @@ int bee_log_level(int level);
 int bee_log_to_file(int level, char *path);
 
 /**
- * @name    bee_add_user
+ * @name    bee_dev_add_user
  * @brief   device add user to allow list
  * @param   user    the remote user id (uid)
  * @param   dev_info
@@ -322,16 +372,25 @@ int bee_log_to_file(int level, char *path);
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_add_user(char *user, char *dev_info, char *user_key);
+int bee_dev_add_user(char *user, char *dev_info, char *user_key);
 
 /**
- * @name    bee_del_user
+ * @name    bee_dev_del_user
  * @brief   delete user from device.
  * @param   user    the remote user id (uid)
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_del_user(char *user);
+int bee_dev_del_user(char *user);
+
+/**
+ * @name    bee_dev_get_user
+ * @brief   get user list from device
+ * @param   list    the remote user list
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_dev_get_user(struct bee_user_list *list);
 
 /**
  * @name    bee_get_nbr_list
@@ -356,6 +415,29 @@ int bee_discover_nbr();
  * @retval  <0      error with error code
  */
 int bee_delete_nbr_list();
+
+/**
+ * @name    bee_new_device
+ * @brief   request a cloud account for a device
+ * @param   vendor_cert    the vendor certificate path
+ * @param   pw             the vendor certificate password
+ * @param   dev_id         the device unique id
+ * @param   pin            the device PIN code
+ * @param   result         the device account result
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_new_device(char *vendor_cert, char *pw, char *dev_id, char *pin, struct sm_dev_account *result);
+
+/**
+ * @name    bee_dev_activation
+ * @brief   request a device activation
+ * @param   dev_id the device unique id
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_dev_activation(char *dev_id);
+
 
 /**
  * @name    bee_reg_sm_cb
@@ -395,13 +477,31 @@ int bee_reg_message_cb(int (*callback)(void *ctx, char *id, int cid, void *data,
 int bee_reg_status_cb(int (*status_cb)(void *ctx,int status));
 
 /**
- * @name    bee_reg_connection_cb
- * @brief   register data connection callback
+ * @name    bee_reg_error_cb
+ * @brief   register library error callback
+ * @param   callback    the error happen callback
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_reg_error_cb(int (*error_cb)(void *ctx,int code));
+
+/**
+ * @name    bee_reg_sender_cb
+ * @brief   register data connection callback (sender side)
  * @param   conn_cb     the connection status callback.
  * @retval  0       success
  * @retval  <0      error with error code
  */
-int bee_reg_connection_cb(int (*conn_cb)(void *ctx, char *remote, int cid, int status));
+int bee_reg_sender_cb(int (*callback)(void *ctx, char *remote, int cid, int status));
+
+/**
+ * @name    bee_reg_receiver_cb
+ * @brief   register data connection callback (receiver side)
+ * @param   conn_cb     the connection status callback.
+ * @retval  0       success
+ * @retval  <0      error with error code
+ */
+int bee_reg_receiver_cb(int (*callback)(void *ctx, char *remote, int cid, int status));
 
 /**
  * @name    noly_hexdump
@@ -436,5 +536,18 @@ int bee_tlv_parser(void *input, unsigned long *type, void **value, unsigned long
  * @retval  >0  output buffer length
  */
 int bee_tlv_creator(unsigned long type, unsigned long len, void *value, void **output);
+
+/*
+ * @name    bee_tlv_appender
+ * @brief   tlv buffer appender
+ * @param   type    tlv type
+ * @param   len     tlv length
+ * @param   value   tlv value
+ * @param   output  output buffer address
+ * @param   rlen    original data length
+ * @retval  <0  error
+ * @retval  >0  output buffer length
+ */
+int bee_tlv_appender(unsigned long type, unsigned long len, void *value, void **output, int rlen);
 
 #endif

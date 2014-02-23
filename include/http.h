@@ -42,12 +42,6 @@
 #define SSL_KEY_PW_LEN	        64
 #define SSL_DATA_LEN	        256
 
-#ifdef DEBUG_HTTP
-#define LOG printf
-#else
-#define LOG
-#endif
-
 enum{
     HTTP_OK,
     HTTP_ERR_TIMEOUT,

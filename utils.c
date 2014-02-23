@@ -6,7 +6,12 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <sys/un.h>
+
+#ifndef __IOS__
 #include <net/if_arp.h>
+#endif
+#include <netinet/tcp.h>
+
 #include <net/if.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -113,6 +118,11 @@ void noly_hexdump(unsigned char *start, int len)
         if((i+1) % 8 == 0) printf("\n");
     }
     printf("\n");
+}
+void noly_set_tcp_nodelay(int sk)
+{
+    int enable = 1;
+    setsockopt(sk, IPPROTO_TCP, TCP_NODELAY, (void*)&enable, sizeof(enable));
 }
 
 int noly_socket_set_reuseaddr(int sk)
@@ -239,7 +249,7 @@ int noly_tcp_socket_from(int start, int *port, int max_cli)
     return INVALID_SOCKET;
 }
 
-int json_obj_get_obj(JSON_Object *obj, char *key, char *val, int len)
+int noly_json_obj_get_obj(JSON_Object *obj, char *key, char *val, int len)
 {
     if(!obj) return -1;
     size_t obj_count = json_object_get_count(obj);
@@ -250,7 +260,7 @@ int json_obj_get_obj(JSON_Object *obj, char *key, char *val, int len)
         if(name){
             JSON_Object *sub_obj = json_object_get_object(obj, name);
             if(sub_obj){//recursive
-                ret = json_obj_get_obj(sub_obj, key, val, len);
+                ret = noly_json_obj_get_obj(sub_obj, key, val, len);
                 if(ret == 0) break;
             }else{
                 if(strcmp(key, name) == 0){
@@ -271,7 +281,93 @@ int json_obj_get_obj(JSON_Object *obj, char *key, char *val, int len)
     return ret;
 }
 
-int json_str_get_obj(char *str, char *key, char *val, int len)
+JSON_Array *noly_json_obj_get_array(JSON_Object *obj, char *key)
+{
+    if(!obj) return NULL;
+    size_t obj_count = json_object_get_count(obj);
+    int i = 0;
+    JSON_Array *res = NULL;
+    for(i = 0 ; i < obj_count ; i++) {
+        const char *name = json_object_get_name(obj, i);
+        if(name){
+            JSON_Object *sub_obj = json_object_get_object(obj, name);
+            if(sub_obj){//recursive
+                res = noly_json_obj_get_array(sub_obj, key);
+                if(res != NULL) {
+                    break;
+                }
+            }else{
+                if(strncmp(name, key, strlen(key)) == 0){
+                    res =  json_object_get_array(obj, name);
+                    return res;
+                }
+            }
+        }else{
+            printf("json object no name???\n");
+        }
+    }
+    return res;
+}
+
+struct noly_json_array *noly_json_str_get_array(char *str, char *key)
+{
+    JSON_Value *js_val = NULL;
+    JSON_Object *js_obj;
+    js_val = json_parse_string(str);
+    if(json_value_get_type(js_val) == JSONObject){
+        js_obj = json_value_get_object(js_val);
+        JSON_Array *ary = noly_json_obj_get_array(js_obj, key);
+        if(ary){
+            struct noly_json_array *res = malloc(sizeof(struct noly_json_array));
+            if(res){
+                res->js_val = js_val;
+                res->array = ary;
+                res->count = 0;
+                res->size = json_array_get_count(ary);
+                return res;
+            }
+        }
+    }
+    return NULL;
+}
+
+struct noly_json_obj *noly_json_array_get_obj(struct noly_json_array *array, int index)
+{
+    struct noly_json_obj *obj = malloc(sizeof(struct noly_json_obj));
+    if(obj){
+        obj->obj = json_array_get_object(array->array, index);
+        if(obj->obj){
+            obj->size = json_object_get_count(obj->obj);
+        }else{
+            free(obj);
+            obj = NULL;
+        }
+    }
+    return obj;   
+}
+
+int noly_json_array_get_str(struct noly_json_array *array, int index, char **str, int *len)
+{
+    const char *val = json_array_get_string(array->array, index);
+    if(val){
+        *str = malloc(strlen(val) + 1);
+        strcpy(*str, val);
+        *len = strlen(val);
+    }
+    return 0;
+}
+
+int json_array_release(struct noly_json_array *array)
+{
+    if(array){
+        json_value_free(array->js_val);
+        free(array);
+    }
+    return 0;
+}
+
+
+int noly_json_str_get_str(const char *str, char *key, char *val, int len)
 {
     int ret = -1;
     if(!key || !val) return -1;
@@ -280,7 +376,7 @@ int json_str_get_obj(char *str, char *key, char *val, int len)
     js_val = json_parse_string(str);
     if(json_value_get_type(js_val) == JSONObject){
         js_obj = json_value_get_object(js_val);
-        ret = json_obj_get_obj(js_obj, key, val, len);
+        ret = noly_json_obj_get_obj(js_obj, key, val, len);
     }
     json_value_free(js_val);
     return ret;
@@ -290,7 +386,7 @@ void test()
 {
     char val[128];
     char tmp[] = "{\"serial\":450024072,\"src\":\"700000165\",\"type\":5,\"version\":\"1.0\"}";
-    json_str_get_obj(tmp, "serial", val, 128);
+    noly_json_str_get_str(tmp, "serial", val, 128);
     printf("result : %s\n", val);
 }
 /*
@@ -343,4 +439,65 @@ int bee_tlv_creator(unsigned long type, unsigned long len, void *value, void **o
         return BEE_TLV_OFFSET + len;
     }
     return -1;
+}
+
+
+int bee_tlv_appender(unsigned long type, unsigned long len, void *value, void **output, int rlen)
+{
+    if(!value || !output) return -1;
+    if(*output) {
+        *output = realloc(*output ,rlen + len + BEE_TLV_OFFSET);
+        unsigned char *ptr = *output;
+        if(*output){
+            ptr[rlen] = type>>8;
+            ptr[rlen + 1] = type & 0xff;
+            ptr[rlen + 2] = (len >> 24)& 0xff;
+            ptr[rlen + 3] = (len >> 16)& 0xff;
+            ptr[rlen + 4] = (len >> 8)& 0xff;
+            ptr[rlen + 5] = len & 0xff;
+            ptr = *output + BEE_TLV_OFFSET + rlen;
+            memcpy(ptr, value, len);
+            return BEE_TLV_OFFSET + len + rlen;
+        }
+    }else{
+        *output = malloc(len + BEE_TLV_OFFSET);
+        unsigned char *ptr = *output;
+        if(*output){
+            ptr[0] = type>>8;
+            ptr[1] = type & 0xff;
+            ptr[2] = (len >> 24)& 0xff;
+            ptr[3] = (len >> 16)& 0xff;
+            ptr[4] = (len >> 8)& 0xff;
+            ptr[5] = len & 0xff;
+            ptr = *output + BEE_TLV_OFFSET;
+            memcpy(ptr, value, len);
+            return BEE_TLV_OFFSET + len;
+        }
+    }
+    return -1;
+}
+
+uint16_t bee_pkt_csum(const void *buff, size_t len)
+{
+    const uint16_t *buf=buff;
+    uint32_t sum;
+
+    // Calculate the sum
+    sum = 0;
+    while (len > 1)
+    {
+        sum += *buf++;
+        if (sum & 0x80000000)
+            sum = (sum & 0xFFFF) + (sum >> 16);
+            len -= 2;
+    }
+    // Add the padding if the packet lenght is odd
+    if ( len & 1 ) sum += *((uint8_t *)buf);
+    // Add the carries
+    while (sum >> 16)
+    {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    // Return the one's complement of sum
+    return ( (uint16_t)(~sum)  );
 }

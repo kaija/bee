@@ -1,8 +1,22 @@
-CFLAGS= -I../include -Wall
-LDFLAGS= ../lib/libbee.a ../../openssl/libssl.a ../../openssl/libcrypto.a ../../mosquitto/lib/libmosquitto.a -lpthread
+CFLAGS= -I../include -Wall -g
+LDFLAGS= ../lib/libbee.a
+LDFLAGS+= -lmosquitto
+LDFLAGS+= -lpthread -lssl -lm -lcrypto -lrt
 
-.PHONY: all dev_connect user_connect test_api nothread user_nothread user_local android switch
-all: dev_connect user_connect test_api sensor nothread user_nothread user_local android switch
+.PHONY: all dev_connect user_connect test_api nothread user_nothread user_local android switch json pkt tlv offline guest user_bind
+all: dev_connect user_connect test_api sensor nothread user_nothread user_local android switch json pkt tlv offline guest user_bind
+
+user_bind: user_bind.o
+	$(CC) -o user_bind.exe user_bind.o $(CFLAGS) $(LDFLAGS)
+
+guest: guest.o
+	$(CC) -o guest.exe guest.o $(CFLAGS) $(LDFLAGS)
+
+offline: offline.o
+	$(CC) -o offline.exe offline.o $(CFLAGS) $(LDFLAGS)
+
+pkt: pkt.o
+	$(CC) -o pkt.exe pkt.o $(CFLAGS) $(LDFLAGS)
 
 dev_connect: dev_connect.o
 	$(CC) -o dev_connect.exe dev_connect.o $(CFLAGS) $(LDFLAGS)
@@ -31,6 +45,12 @@ android: android.o
 switch: switch.o
 	$(CC) -o switch.exe switch.o $(CFLAGS) $(LDFLAGS)
 
+json: json.o
+	$(CC) -o json.exe json.o $(CFLAGS) $(LDFLAGS)
+
+tlv: tlv.o
+	$(CC) -o tlv.exe tlv.o $(CFLAGS) $(LDFLAGS)
+
 
 clean:
-	rm *.o  *.exe -rf
+	rm -rf *.o *.exe

@@ -10,6 +10,8 @@
 #include <ctype.h>
 #include <openssl/md5.h>
 
+#include <netinet/tcp.h>
+
 #include "log.h"
 #include "http.h"
 
@@ -56,13 +58,19 @@ void http_socket_recvtimeout(int sk, int timeout)
     }
 }
 
-void http_nonblock_socket(int sk)
+static void http_set_tcp_nodelay(int fd)
+{
+    int enable = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (void*)&enable, sizeof(enable));
+}
+
+static void http_nonblock_socket(int sk)
 {
     unsigned long fc = 1;
     ioctl(sk, FIONBIO, &fc);
 }
 
-void http_block_socket(int sk)
+static void http_block_socket(int sk)
 {
     unsigned long fc = 0;
     ioctl(sk, FIONBIO, &fc);
@@ -1060,9 +1068,14 @@ int http_recv_resp(struct http_data *hd) {
 }
 
 int http_perform(struct http_data *hd) {
-    struct hostent *server = NULL;
     int ret = -1;
     char loc[HTTP_HOST_LEN];
+    struct addrinfo hints;
+    struct addrinfo *server;
+    int status;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_family = AF_INET;
     if(http_host_parse(hd) != 0) {
         PLOG(PLOG_LEVEL_DEBUG,"Error: URL parsing error!\nHOST:%s\nPORT:%d\nPATH:%s\n",
             hd->uri.host, hd->uri.port, hd->uri.path);
@@ -1072,12 +1085,20 @@ int http_perform(struct http_data *hd) {
             hd->uri.host, hd->uri.port, hd->uri.path);
 #endif
     }
-    server = gethostbyname(hd->uri.host);
-    if(server == NULL) {
-        PLOG(PLOG_LEVEL_DEBUG,"Error: Gethostbyname failure\n");
+    struct timeval tv1, tv2;
+    unsigned long long start_utime, end_utime;
+    gettimeofday(&tv1,NULL);
+PLOG(PLOG_LEVEL_DEBUG, "\n");
+    if((status = getaddrinfo(hd->uri.host, NULL, &hints, &server)) != 0){
+        PLOG(PLOG_LEVEL_ERROR, "getaddrinfo error %s\n", gai_strerror(status));
         return -HTTP_ERR_CONN;
     }
-    memcpy(&(hd->srv_addr.sin_addr), server->h_addr, sizeof(hd->srv_addr.sin_addr));
+    gettimeofday(&tv2,NULL);
+    start_utime = tv1.tv_sec * 1000000 + tv1.tv_usec;
+    end_utime = tv2.tv_sec * 1000000 + tv2.tv_usec;
+
+PLOG(PLOG_LEVEL_DEBUG, "it tooks %llu\n", end_utime - start_utime);
+    hd->srv_addr.sin_addr = ((struct sockaddr_in *) (server->ai_addr))->sin_addr;
     hd->srv_addr.sin_family = AF_INET;
     hd->srv_addr.sin_port = htons(hd->uri.port);
     hd->sk = socket(AF_INET, SOCK_STREAM, 0);
@@ -1085,15 +1106,19 @@ int http_perform(struct http_data *hd) {
         PLOG(PLOG_LEVEL_DEBUG,"Error: create socket failure %d\n", hd->sk);
         return -HTTP_ERR_SOCKET;
     }
+    freeaddrinfo(server);
 	http_socket_reuseaddr(hd->sk);
     //http_nonblock_socket(hd->sk);
     http_socket_sendtimeout(hd->sk, HTTP_TIMEOUT);
     http_socket_recvtimeout(hd->sk, HTTP_TIMEOUT);
     if(connect(hd->sk, (struct sockaddr *)&(hd->srv_addr), sizeof(struct sockaddr)) == -1 &&
          errno != EINPROGRESS) {
-        PLOG(PLOG_LEVEL_DEBUG,"Error: Cannot connect to server\n");
-        destroy_http(hd);
-        return -HTTP_ERR_CONN;
+        if(connect(hd->sk, (struct sockaddr *)&(hd->srv_addr), sizeof(struct sockaddr)) == -1 &&
+            errno != EINPROGRESS) {
+            PLOG(PLOG_LEVEL_DEBUG,"Error: Cannot connect to server\n");
+            destroy_http(hd);
+            return -HTTP_ERR_CONN;
+        }
     }
     if(hd->uri.proto == PROTO_HTTPS) {
         if(http_ssl_setup(hd) == -1){
